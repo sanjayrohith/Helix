@@ -7,6 +7,8 @@ import { DeploymentResult } from './components/DeploymentResult';
 import { provisionSlice, getAllSlices, deleteSlice, getSliceStats } from './services/api';
 import { websocketService } from './services/websocket';
 
+type VisualMode = 'cinematic' | 'minimal';
+
 function App() {
   const [slices, setSlices] = useState<SliceConfig[]>([]);
   const [stats, setStats] = useState<SliceStats | null>(null);
@@ -15,6 +17,10 @@ function App() {
   const [provisioning, setProvisioning] = useState(false);
   const [deletingSliceId, setDeletingSliceId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+  const [visualMode, setVisualMode] = useState<VisualMode>(() => {
+    const saved = localStorage.getItem('helix.visualMode');
+    return saved === 'minimal' ? 'minimal' : 'cinematic';
+  });
 
   // Fetch initial data
   const fetchData = useCallback(async () => {
@@ -73,6 +79,10 @@ function App() {
     };
   }, [fetchData, handleWebSocketMessage]);
 
+  useEffect(() => {
+    localStorage.setItem('helix.visualMode', visualMode);
+  }, [visualMode]);
+
   // Handle provision slice
   const handleProvision = async (intent: string) => {
     setProvisioning(true);
@@ -121,18 +131,18 @@ function App() {
   };
 
   return (
-    <div className="helix-app min-h-screen text-primary relative overflow-x-hidden">
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -top-24 left-1/3 h-72 w-72 rounded-full bg-cyan/15 blur-3xl" />
-        <div className="absolute top-64 -left-20 h-80 w-80 rounded-full bg-sky-500/15 blur-3xl" />
+    <div className={`helix-app helix-theme-${visualMode} min-h-screen text-primary relative overflow-x-hidden`}>
+      <div className={`pointer-events-none absolute inset-0 ${visualMode === 'minimal' ? 'opacity-40' : ''}`}>
+        <div className={`absolute -top-24 left-1/3 h-72 w-72 rounded-full bg-cyan/15 blur-3xl ${visualMode === 'minimal' ? 'hidden md:block' : ''}`} />
+        <div className={`absolute top-64 -left-20 h-80 w-80 rounded-full bg-sky-500/15 blur-3xl ${visualMode === 'minimal' ? 'hidden md:block' : ''}`} />
         <div className="absolute bottom-20 right-0 h-96 w-96 rounded-full bg-emerald-400/10 blur-3xl" />
       </div>
       {/* Header */}
-      <header className="border-b border-white/10 bg-[#0b1225]/80 backdrop-blur-xl sticky top-0 z-50">
+      <header className="helix-header border-b border-white/10 bg-[#0b1225]/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-gradient-to-br from-cyan-300 via-cyan to-cyan-600 rounded-xl flex items-center justify-center ring-1 ring-cyan/70 shadow-[0_0_20px_rgba(0,212,255,0.35)]">
+              <div className="helix-logo w-11 h-11 bg-gradient-to-br from-cyan-300 via-cyan to-cyan-600 rounded-xl flex items-center justify-center ring-1 ring-cyan/70 shadow-[0_0_20px_rgba(0,212,255,0.35)]">
                 <svg className="w-6 h-6 text-background" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                 </svg>
@@ -147,9 +157,35 @@ function App() {
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-success pulse-dot"></span>
-              <span className="text-sm text-slate-200 font-syne">Connected</span>
+            <div className="flex items-center justify-between gap-4 md:justify-end">
+              <div className="mode-switch flex items-center gap-1 rounded-xl border border-white/15 bg-white/[0.04] p-1">
+                <button
+                  type="button"
+                  onClick={() => setVisualMode('cinematic')}
+                  className={`px-3 py-1.5 text-xs font-semibold tracking-wide rounded-lg transition-all ${
+                    visualMode === 'cinematic'
+                      ? 'bg-cyan/20 text-cyan-100 border border-cyan/35'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Cinematic
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVisualMode('minimal')}
+                  className={`px-3 py-1.5 text-xs font-semibold tracking-wide rounded-lg transition-all ${
+                    visualMode === 'minimal'
+                      ? 'bg-cyan/20 text-cyan-100 border border-cyan/35'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Minimal
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-success pulse-dot"></span>
+                <span className="text-sm text-slate-200 font-syne">Connected</span>
+              </div>
             </div>
           </div>
         </div>
@@ -197,27 +233,35 @@ function App() {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 py-8 md:py-10 relative z-10">
-        <section className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 backdrop-blur-sm">
+        <section className="reveal-up mb-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 backdrop-blur-sm">
           <p className="text-[11px] uppercase tracking-[0.18em] text-cyan/80 font-semibold">Operational Visibility</p>
           <h2 className="text-slate-100 text-lg md:text-xl font-syne">Intent to deployment, in one control plane.</h2>
         </section>
-        <StatsBar stats={stats} loading={loading} />
+        <div className="reveal-up reveal-delay-1">
+          <StatsBar stats={stats} loading={loading} />
+        </div>
 
-        <IntentInput onSubmit={handleProvision} loading={provisioning} />
+        <div className="reveal-up reveal-delay-2">
+          <IntentInput onSubmit={handleProvision} loading={provisioning} />
+        </div>
 
         {deploymentResult && (
-          <DeploymentResult
-            result={deploymentResult}
-            onDismiss={() => setDeploymentResult(null)}
-          />
+          <div className="reveal-up reveal-delay-2">
+            <DeploymentResult
+              result={deploymentResult}
+              onDismiss={() => setDeploymentResult(null)}
+            />
+          </div>
         )}
 
-        <SliceDashboard
-          slices={slices}
-          loading={loading}
-          onDeleteSlice={handleDeleteSlice}
-          deletingSliceId={deletingSliceId}
-        />
+        <div className="reveal-up reveal-delay-3">
+          <SliceDashboard
+            slices={slices}
+            loading={loading}
+            onDeleteSlice={handleDeleteSlice}
+            deletingSliceId={deletingSliceId}
+          />
+        </div>
       </main>
 
       {/* Footer */}

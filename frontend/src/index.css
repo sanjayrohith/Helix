@@ -115,6 +115,18 @@ html body {
   position: relative;
 }
 
+.helix-header {
+  transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.helix-logo {
+  transition: box-shadow 0.3s ease, filter 0.3s ease;
+}
+
+.mode-switch {
+  backdrop-filter: blur(8px);
+}
+
 .helix-app::after {
   content: '';
   position: fixed;
@@ -127,6 +139,67 @@ html body {
   background: linear-gradient(175deg, rgba(14, 29, 58, 0.86), rgba(7, 16, 34, 0.9));
   border: 1px solid rgba(147, 196, 255, 0.22);
   box-shadow: 0 20px 38px rgba(4, 10, 24, 0.42);
+}
+
+.helix-theme-cinematic .helix-app::after {
+  background:
+    linear-gradient(180deg, rgba(3, 7, 17, 0.08), rgba(3, 7, 17, 0.68)),
+    radial-gradient(circle at 24% -5%, rgba(42, 223, 255, 0.14), transparent 38%);
+}
+
+.helix-theme-cinematic .helix-header {
+  background: rgba(8, 17, 36, 0.8);
+  border-bottom-color: rgba(100, 176, 255, 0.24);
+}
+
+.helix-theme-cinematic .helix-logo {
+  filter: saturate(1.08);
+  box-shadow: 0 0 24px rgba(42, 223, 255, 0.4);
+}
+
+.helix-theme-minimal .helix-app::after {
+  background: linear-gradient(180deg, rgba(5, 11, 26, 0.02), rgba(5, 11, 26, 0.2));
+}
+
+.helix-theme-minimal .helix-header {
+  background: rgba(9, 18, 34, 0.95);
+  border-bottom-color: rgba(128, 153, 192, 0.26);
+}
+
+.helix-theme-minimal .helix-logo {
+  filter: saturate(0.88);
+  box-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+.helix-theme-minimal .mode-switch {
+  background: rgba(148, 163, 184, 0.08);
+  border-color: rgba(148, 163, 184, 0.24);
+}
+
+.helix-theme-minimal .panel-glow::before {
+  background: linear-gradient(120deg, rgba(168, 188, 224, 0.12), transparent 52%);
+}
+
+.helix-theme-minimal .intent-shell {
+  background: linear-gradient(180deg, rgba(18, 29, 50, 0.9), rgba(16, 28, 49, 0.9));
+  border-color: rgba(153, 177, 214, 0.28);
+  box-shadow: 0 8px 20px rgba(9, 15, 33, 0.26);
+}
+
+.helix-theme-minimal .stat-card,
+.helix-theme-minimal .stat-card-conflict {
+  background: linear-gradient(180deg, rgba(19, 31, 53, 0.92), rgba(17, 28, 47, 0.92));
+  border-color: rgba(150, 176, 216, 0.24);
+}
+
+.helix-theme-minimal .stat-card-hover:hover {
+  box-shadow: 0 8px 18px rgba(9, 14, 33, 0.32);
+  transform: translateY(-1px);
+}
+
+.helix-theme-minimal .provision-btn {
+  background: linear-gradient(135deg, #6ad7eb, #53bdd8);
+  box-shadow: 0 8px 16px rgba(59, 121, 151, 0.24);
 }
 
 .stat-card {
@@ -342,4 +415,65 @@ html body {
 
 .pulse-dot {
   animation: pulse-dot 1.5s ease-in-out infinite;
+}
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.reveal-up {
+  animation: reveal-up 480ms cubic-bezier(0.2, 0.75, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.reveal-delay-1 {
+  animation-delay: 70ms;
+}
+
+.reveal-delay-2 {
+  animation-delay: 130ms;
+}
+
+.reveal-delay-3 {
+  animation-delay: 190ms;
+}
+
+.stats-grid > .reveal-up:nth-child(1),
+.slice-grid > .reveal-up:nth-child(1) {
+  animation-delay: 40ms;
+}
+
+.stats-grid > .reveal-up:nth-child(2),
+.slice-grid > .reveal-up:nth-child(2) {
+  animation-delay: 100ms;
+}
+
+.stats-grid > .reveal-up:nth-child(3),
+.slice-grid > .reveal-up:nth-child(3) {
+  animation-delay: 160ms;
+}
+
+.stats-grid > .reveal-up:nth-child(4),
+.slice-grid > .reveal-up:nth-child(4) {
+  animation-delay: 220ms;
+}
+
+.slice-grid > .reveal-up:nth-child(n + 5) {
+  animation-delay: 260ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal-up,
+  .pulse-dot,
+  .animate-pulse-glow {
+    animation: none !important;
+    transition: none !important;
+  }
 }

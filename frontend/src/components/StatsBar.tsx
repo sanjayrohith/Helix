@@ -11,9 +11,9 @@ export function StatsBar({ stats, loading }: StatsBarProps) {
     : 0;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
+    <div className="stats-grid grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-8">
       {/* Active Slices */}
-      <div className="stat-card p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
+      <div className="stat-card reveal-up p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
         <div className="flex items-center justify-between mb-2">
           <div className="stat-label mb-0">Active Slices</div>
           <div className="stat-icon-wrap text-cyan">
@@ -40,7 +40,7 @@ export function StatsBar({ stats, loading }: StatsBarProps) {
       </div>
 
       {/* Bandwidth Used */}
-      <div className="stat-card p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
+      <div className="stat-card reveal-up p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
         <div className="flex items-center justify-between mb-2">
           <div className="stat-label mb-0">Bandwidth Used</div>
           <div className="stat-icon-wrap text-cyan">
@@ -72,7 +72,7 @@ export function StatsBar({ stats, loading }: StatsBarProps) {
       </div>
 
       {/* Bandwidth Available */}
-      <div className="stat-card p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
+      <div className="stat-card reveal-up p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
         <div className="flex items-center justify-between mb-2">
           <div className="stat-label mb-0">Bandwidth Available</div>
           <div className="stat-icon-wrap text-cyan">
@@ -97,7 +97,7 @@ export function StatsBar({ stats, loading }: StatsBarProps) {
       </div>
 
       {/* Conflicts - Red accent */}
-      <div className="stat-card-conflict p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
+      <div className="stat-card-conflict reveal-up p-5 stat-card-hover shadow-[0_14px_30px_rgba(8,15,35,0.45)]">
         <div className="flex items-center justify-between mb-2">
           <div className="stat-label mb-0">Conflicts</div>
           <div className="stat-icon-wrap text-danger border-danger/30 bg-danger/10">

@@ -61,7 +61,7 @@ export function SliceCard({ slice, onDelete, deleting }: SliceCardProps) {
   };
 
   return (
-    <div className={`bg-white/[0.045] border border-white/10 border-t-2 ${sstPalette.border} rounded-2xl p-5 hover:border-cyan/40 transition-all duration-200 hover:-translate-y-0.5 panel-glow shadow-[0_16px_30px_rgba(5,10,25,0.35)]`}>
+    <div className={`reveal-up bg-white/[0.045] border border-white/10 border-t-2 ${sstPalette.border} rounded-2xl p-5 hover:border-cyan/40 transition-all duration-200 hover:-translate-y-0.5 panel-glow shadow-[0_16px_30px_rgba(5,10,25,0.35)]`}>
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">

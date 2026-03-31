@@ -16,11 +16,11 @@ export function SliceDashboard({
 }: SliceDashboardProps) {
   if (loading) {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="slice-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {[1, 2, 3].map((i) => (
           <div
             key={i}
-            className="bg-white/[0.04] border border-white/10 rounded-2xl p-5 animate-pulse"
+            className="reveal-up bg-white/[0.04] border border-white/10 rounded-2xl p-5 animate-pulse"
           >
             <div className="h-6 bg-slate-700/60 rounded w-3/4 mb-3"></div>
             <div className="h-4 bg-slate-700/60 rounded w-1/4 mb-4"></div>
@@ -37,7 +37,7 @@ export function SliceDashboard({
 
   if (slices.length === 0) {
     return (
-      <div className="bg-white/[0.04] border border-white/10 rounded-2xl p-12 text-center panel-glow">
+      <div className="reveal-up bg-white/[0.04] border border-white/10 rounded-2xl p-12 text-center panel-glow">
         {/* Hexagon SVG Icon */}
         <div className="flex justify-center mb-4">
           <svg
@@ -85,7 +85,7 @@ export function SliceDashboard({
           {slices.length} live
         </span>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="slice-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {slices.map((slice) => (
           <SliceCard
             key={slice.slice_id}
