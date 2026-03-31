@@ -21,28 +21,34 @@ Example: "Create a high-security low-latency slice for 500 hospital devices in C
 
   return (
     <form onSubmit={handleSubmit} className="mb-6">
-      <div className="bg-navy-800 border border-navy-600 rounded-lg p-4">
-        <label className="block text-gray-300 text-sm font-medium mb-2">
-          Network Slice Intent
-        </label>
+      <div className="intent-shell rounded-2xl p-5 md:p-6 panel-glow">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <label className="block text-slate-200 text-sm font-syne font-semibold tracking-wide">
+            Network Slice Intent
+          </label>
+          <span className="text-[11px] font-mono text-cyan border border-cyan/40 rounded-md px-2 py-1 bg-cyan/10">
+            NL → S-NSSAI
+          </span>
+        </div>
+        <p className="text-xs text-slate-300 mb-3">
+          Describe business goals, latency target, capacity, device count, and location.
+        </p>
         <textarea
           value={intent}
           onChange={(e) => setIntent(e.target.value)}
           placeholder={placeholder}
-          className="w-full h-32 bg-navy-900 border border-navy-600 rounded-lg p-3 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-cyan-400 resize-none font-mono text-sm"
+          className="intent-textarea w-full h-32 rounded-md p-3 resize-none font-mono text-sm transition-all"
           disabled={loading}
         />
         <div className="flex items-center justify-between mt-3">
-          <span className="text-gray-500 text-xs">
+          <span className="text-slate-400 text-xs font-mono">
             {intent.length} characters
           </span>
           <button
             type="submit"
             disabled={!intent.trim() || loading}
-            className={`px-6 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
-              !intent.trim() || loading
-                ? 'bg-navy-600 text-gray-500 cursor-not-allowed'
-                : 'bg-cyan-500 text-navy-900 hover:bg-cyan-400'
+            className={`provision-btn flex items-center gap-2 ${
+              !intent.trim() || loading ? 'provision-btn-disabled' : ''
             }`}
           >
             {loading && (

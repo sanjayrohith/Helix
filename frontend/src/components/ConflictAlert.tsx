@@ -26,7 +26,7 @@ export function ConflictAlert({ conflict }: ConflictAlertProps) {
   };
 
   return (
-    <div className="bg-danger/10 border border-danger/30 rounded-lg p-4">
+    <div className="bg-rose-400/10 border border-rose-300/30 rounded-2xl p-5 backdrop-blur-sm">
       <div className="flex items-start gap-3">
         <div className="flex-shrink-0">
           <svg
@@ -45,7 +45,7 @@ export function ConflictAlert({ conflict }: ConflictAlertProps) {
         </div>
         <div className="flex-1">
           <div className="flex items-center gap-2 mb-2">
-            <h4 className="text-danger font-medium">
+            <h4 className="text-rose-200 font-semibold">
               {getConflictTitle(conflict.conflict_type)}
             </h4>
             <span
@@ -56,13 +56,13 @@ export function ConflictAlert({ conflict }: ConflictAlertProps) {
               {conflict.conflict_type}
             </span>
           </div>
-          <p className="text-gray-300 text-sm mb-3">{conflict.details}</p>
+          <p className="text-slate-200 text-sm mb-3">{conflict.details}</p>
           {conflict.suggestions.length > 0 && (
             <div>
-              <h5 className="text-gray-400 text-sm font-medium mb-2">
+              <h5 className="text-slate-300 text-sm font-medium mb-2">
                 Recommended Actions:
               </h5>
-              <ul className="list-disc list-inside text-gray-400 text-sm space-y-1">
+              <ul className="list-disc list-inside text-slate-300 text-sm space-y-1">
                 {conflict.suggestions.map((suggestion, index) => (
                   <li key={index}>{suggestion}</li>
                 ))}

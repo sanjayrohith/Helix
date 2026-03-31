@@ -121,25 +121,35 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-navy-900 text-gray-100">
+    <div className="helix-app min-h-screen text-primary relative overflow-x-hidden">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-24 left-1/3 h-72 w-72 rounded-full bg-cyan/15 blur-3xl" />
+        <div className="absolute top-64 -left-20 h-80 w-80 rounded-full bg-sky-500/15 blur-3xl" />
+        <div className="absolute bottom-20 right-0 h-96 w-96 rounded-full bg-emerald-400/10 blur-3xl" />
+      </div>
       {/* Header */}
-      <header className="border-b border-navy-700 bg-navy-800/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b border-white/10 bg-[#0b1225]/80 backdrop-blur-xl sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-cyan-500 rounded-lg flex items-center justify-center">
-                <svg className="w-6 h-6 text-navy-900" viewBox="0 0 24 24" fill="currentColor">
+              <div className="w-11 h-11 bg-gradient-to-br from-cyan-300 via-cyan to-cyan-600 rounded-xl flex items-center justify-center ring-1 ring-cyan/70 shadow-[0_0_20px_rgba(0,212,255,0.35)]">
+                <svg className="w-6 h-6 text-background" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                 </svg>
               </div>
               <div>
-                <h1 className="text-xl font-bold text-gray-100">HELIX</h1>
-                <p className="text-xs text-gray-500">5G Intent-Based Network Slicing</p>
+                <h1 className="text-xl font-syne font-bold text-white tracking-wide">HELIX</h1>
+                <div className="flex items-center gap-2">
+                  <p className="text-xs text-slate-300">5G Intent-Based Network Slicing</p>
+                  <span className="text-[10px] uppercase tracking-[0.12em] text-cyan border border-cyan/50 rounded px-1.5 py-0.5 bg-cyan/10">
+                    Orchestrator
+                  </span>
+                </div>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-success animate-pulse"></span>
-              <span className="text-sm text-gray-400">Connected</span>
+              <span className="w-2 h-2 rounded-full bg-success pulse-dot"></span>
+              <span className="text-sm text-slate-200 font-syne">Connected</span>
             </div>
           </div>
         </div>
@@ -148,15 +158,15 @@ function App() {
       {/* Toast Notification */}
       {toast && (
         <div
-          className={`fixed top-20 right-4 z-50 px-4 py-3 rounded-lg shadow-lg transition-all ${
+          className={`fixed top-20 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl transition-all backdrop-blur-xl ${
             toast.type === 'success'
-              ? 'bg-success/20 border border-success/30 text-success'
+              ? 'bg-emerald-400/15 border border-emerald-300/40 text-emerald-200'
               : toast.type === 'error'
-              ? 'bg-danger/20 border border-danger/30 text-danger'
-              : 'bg-yellow-500/20 border border-yellow-500/30 text-yellow-400'
+              ? 'bg-rose-400/15 border border-rose-300/40 text-rose-200'
+              : 'bg-amber-300/20 border border-amber-200/40 text-amber-100'
           }`}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 font-syne">
             {toast.type === 'success' && (
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -175,7 +185,7 @@ function App() {
             <span>{toast.message}</span>
             <button
               onClick={() => setToast(null)}
-              className="ml-2 text-current opacity-70 hover:opacity-100"
+              className="ml-2 text-current opacity-70 hover:opacity-100 transition-opacity"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -186,7 +196,11 @@ function App() {
       )}
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-6">
+      <main className="max-w-7xl mx-auto px-4 py-8 md:py-10 relative z-10">
+        <section className="mb-6 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 backdrop-blur-sm">
+          <p className="text-[11px] uppercase tracking-[0.18em] text-cyan/80 font-semibold">Operational Visibility</p>
+          <h2 className="text-slate-100 text-lg md:text-xl font-syne">Intent to deployment, in one control plane.</h2>
+        </section>
         <StatsBar stats={stats} loading={loading} />
 
         <IntentInput onSubmit={handleProvision} loading={provisioning} />
@@ -207,9 +221,9 @@ function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-navy-700 mt-12">
+      <footer className="border-t border-white/10 mt-12 bg-black/10">
         <div className="max-w-7xl mx-auto px-4 py-4">
-          <p className="text-center text-gray-600 text-sm">
+          <p className="text-center text-slate-300 text-sm font-syne">
             HELIX - LLM-Powered 5G Network Slice Provisioning
           </p>
         </div>
