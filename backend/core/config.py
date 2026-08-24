@@ -90,6 +90,12 @@ class Settings:
         self.telemetry_interval_seconds: float = _get_float("HELIX_TELEMETRY_INTERVAL", 2.0)
         self.telemetry_history_size: int = _get_int("HELIX_TELEMETRY_HISTORY", 120)
 
+        # --- SDN controller simulation ------------------------------------------
+        # Scales every simulated deployment step; set to 0 for instant deploys.
+        self.sdn_step_scale: float = _get_float("HELIX_SDN_STEP_SCALE", 1.0)
+        self.sdn_failure_rate: float = _get_float("HELIX_SDN_FAILURE_RATE", 0.0)
+        self.sdn_controller_name: str = os.getenv("HELIX_SDN_CONTROLLER", "Ryu SDN Controller")
+
         # --- Logging ---------------------------------------------------------
         self.log_level: str = os.getenv("HELIX_LOG_LEVEL", "INFO").upper()
         self.log_json: bool = _get_bool("HELIX_LOG_JSON", False)

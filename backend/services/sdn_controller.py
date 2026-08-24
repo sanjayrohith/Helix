@@ -1,112 +1,230 @@
-"""Mock Ryu SDN Controller simulation for slice deployment."""
+"""Simulated SDN controller.
+
+Stands in for a Ryu controller programming OpenFlow switches. The simulation
+now produces the artefacts a real deployment would - concrete flow rules, a
+QoS queue definition and a per-slice deployment record - so the rest of HELIX
+(and the UI) can work against a realistic shape rather than a boolean.
+
+Timing is configurable: HELIX_SDN_STEP_SCALE=0 makes deployments instant,
+which is what the test suite and CI use.
+"""
+
+from __future__ import annotations
 
 import asyncio
-import logging
 import random
+from dataclasses import dataclass, field
+from datetime import datetime
 
-from models.slice_models import SliceConfig
+from core.config import settings
+from core.logging_config import get_logger
+from core.telecom import SST_NAMES, packet_delay_budget
+from models.slice_models import SliceConfig, utcnow
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger("sdn")
+
+# Datapath identifiers for the simulated switches in the transport fabric.
+DATAPATHS = ("0x0000000000000001", "0x0000000000000002", "0x0000000000000003")
+
+
+class SdnDeploymentError(RuntimeError):
+    """Raised when the controller refuses or fails a deployment."""
+
+
+@dataclass
+class FlowRule:
+    """One OpenFlow rule as it would be installed on a datapath."""
+
+    datapath_id: str
+    table_id: int
+    priority: int
+    match: dict
+    actions: list[str]
+    idle_timeout: int = 0
+
+    def as_dict(self) -> dict:
+        return {
+            "datapath_id": self.datapath_id,
+            "table_id": self.table_id,
+            "priority": self.priority,
+            "match": self.match,
+            "actions": self.actions,
+            "idle_timeout": self.idle_timeout,
+        }
+
+
+@dataclass
+class DeploymentRecord:
+    """What the controller did for one slice."""
+
+    slice_id: str
+    slice_name: str
+    deployed_at: datetime = field(default_factory=utcnow)
+    flow_rules: list[FlowRule] = field(default_factory=list)
+    queue_id: int = 0
+    steps: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict:
+        return {
+            "slice_id": self.slice_id,
+            "slice_name": self.slice_name,
+            "deployed_at": self.deployed_at.isoformat(),
+            "queue_id": self.queue_id,
+            "flow_rules": [rule.as_dict() for rule in self.flow_rules],
+            "steps": self.steps,
+        }
+
+
+def build_flow_rules(config: SliceConfig) -> list[FlowRule]:
+    """Derive the OpenFlow rules that would carry a slice's traffic.
+
+    ARP maps onto flow priority (ARP=1 is the highest, so it gets the highest
+    priority number) and the S-NSSAI becomes the match, which is how a real
+    deployment keeps slices from stealing each other's traffic.
+    """
+    priority = 40_000 + (16 - config.arp_priority) * 1_000
+    queue_id = config.qos_5qi
+    match = {
+        "eth_type": "0x0800",
+        "s_nssai": config.snssai,
+        "sst": config.sst,
+        "sd": config.sd,
+    }
+
+    rules: list[FlowRule] = []
+    for index, datapath in enumerate(DATAPATHS):
+        actions = [f"set_queue:{queue_id}", f"meter:{config.sst}"]
+        # The last hop in the chain forwards out of the fabric; the rest chain on.
+        actions.append("output:NORMAL" if index == len(DATAPATHS) - 1 else f"goto_table:{index + 1}")
+        rules.append(
+            FlowRule(
+                datapath_id=datapath,
+                table_id=index,
+                priority=priority,
+                match=match,
+                actions=actions,
+                # Dedicated and strict slices hold their rules; shared ones age out.
+                idle_timeout=0 if config.isolation != "shared" else 600,
+            )
+        )
+    return rules
 
 
 class MockSDNController:
-    """
-    Simulates a Ryu SDN Controller for network slice deployment.
+    """Simulates a Ryu controller programming the transport fabric."""
 
-    In a production environment, this would interface with the actual
-    Ryu controller to configure OpenFlow switches, install flow rules,
-    and set up QoS policies for the network slice.
-    """
-
-    def __init__(self):
-        self.controller_name = "Ryu SDN Controller"
-        self.controller_version = "4.34"  # Mock version
+    def __init__(self) -> None:
+        self.controller_name = settings.sdn_controller_name
+        self.controller_version = "4.34"
         self._is_connected = True
+        self._deployments: dict[str, DeploymentRecord] = {}
+        self.deploy_count = 0
+        self.failure_count = 0
 
-    async def deploy_slice(self, config: SliceConfig) -> bool:
-        """
-        Deploy a network slice configuration to the SDN controller.
-
-        This mock implementation simulates:
-        1. Connecting to the controller
-        2. Installing flow rules for the slice
-        3. Configuring QoS policies
-        4. Setting up isolation boundaries
-
-        Args:
-            config: The validated slice configuration to deploy
-
-        Returns:
-            True if deployment succeeds, False otherwise
-        """
-        logger.info(f"Deploying slice {config.slice_id} to {self.controller_name}...")
-
-        # Simulate deployment steps with realistic timing
-        deployment_steps = [
-            ("Validating slice parameters", 0.1),
-            ("Reserving network resources", 0.2),
+    def _steps(self, config: SliceConfig) -> list[tuple[str, float]]:
+        """The deployment sequence with its nominal per-step duration."""
+        return [
+            ("Validating slice parameters", 0.10),
+            ("Reserving transport resources", 0.20),
             (
-                f"Installing QoS policy (5QI={config.qos_5qi}, GBR={config.guaranteed_bitrate_mbps}Mbps)",
-                0.3,
+                f"Installing QoS policy (5QI={config.qos_5qi}, "
+                f"GBR={config.guaranteed_bitrate_mbps:.0f} Mbps, "
+                f"PDB={packet_delay_budget(config.qos_5qi)} ms)",
+                0.30,
             ),
-            (f"Configuring S-NSSAI (SST={config.sst}, SD={config.sd})", 0.2),
-            (f"Setting ARP priority level {config.arp_priority}", 0.1),
-            (f"Applying {config.isolation} isolation rules", 0.3),
-            ("Activating slice on edge nodes", 0.3),
+            (f"Programming S-NSSAI match {config.snssai}", 0.20),
+            (f"Setting ARP priority {config.arp_priority}", 0.10),
+            (f"Applying {config.isolation} isolation", 0.30),
+            (f"Activating on {len(DATAPATHS)} edge datapaths", 0.30),
         ]
 
-        for step_name, base_time in deployment_steps:
-            # Add some randomness to simulate real-world variability
-            sleep_time = base_time + random.uniform(0.1, 0.3)
-            logger.info(f"  [{config.slice_id[:8]}] {step_name}...")
-            await asyncio.sleep(sleep_time)
+    async def deploy_slice(self, config: SliceConfig) -> bool:
+        """Program a slice onto the fabric, returning True on success."""
+        record = await self.deploy(config)
+        return record is not None
 
-        # Simulate random delay between 0.5 and 2.0 seconds total remaining
-        remaining_delay = random.uniform(0.0, 0.5)
-        await asyncio.sleep(remaining_delay)
+    async def deploy(self, config: SliceConfig) -> DeploymentRecord | None:
+        """Program a slice and return the resulting deployment record."""
+        if not self._is_connected:
+            raise SdnDeploymentError(f"{self.controller_name} is not connected")
 
         logger.info(
-            f"Deploying slice {config.slice_id} to {self.controller_name}... Done."
-        )
-        logger.info(
-            f"  Slice '{config.name}' activated successfully:\n"
-            f"    - S-NSSAI: SST={config.sst}, SD={config.sd}\n"
-            f"    - QoS: 5QI={config.qos_5qi}, GBR={config.guaranteed_bitrate_mbps}Mbps\n"
-            f"    - Devices: {config.device_count}, Location: {config.location}"
+            "Deploying '%s' (%s) to %s",
+            config.name,
+            SST_NAMES.get(config.sst, "?"),
+            self.controller_name,
         )
 
-        # Always return True for MVP (deployment succeeds)
-        return True
+        completed: list[str] = []
+        for description, duration in self._steps(config):
+            await self._pause(duration)
+            completed.append(description)
+            logger.debug("  [%s] %s", config.slice_id[:8], description)
+
+        if settings.sdn_failure_rate > 0 and random.random() < settings.sdn_failure_rate:
+            self.failure_count += 1
+            logger.warning("Controller rejected '%s' (simulated failure)", config.name)
+            return None
+
+        record = DeploymentRecord(
+            slice_id=config.slice_id,
+            slice_name=config.name,
+            flow_rules=build_flow_rules(config),
+            queue_id=config.qos_5qi,
+            steps=completed,
+        )
+        self._deployments[config.slice_id] = record
+        self.deploy_count += 1
+
+        logger.info(
+            "Activated '%s': %d flow rule(s) across %d datapath(s), queue %d",
+            config.name,
+            len(record.flow_rules),
+            len(DATAPATHS),
+            record.queue_id,
+        )
+        return record
 
     async def remove_slice(self, slice_id: str) -> bool:
-        """
-        Remove a deployed slice from the SDN controller.
-
-        Args:
-            slice_id: The UUID of the slice to remove
-
-        Returns:
-            True if removal succeeds, False otherwise
-        """
-        logger.info(f"Removing slice {slice_id} from {self.controller_name}...")
-
-        # Simulate removal delay
-        await asyncio.sleep(random.uniform(0.3, 0.8))
-
-        logger.info(f"Removing slice {slice_id} from {self.controller_name}... Done.")
+        """Withdraw a slice's flow rules from the fabric."""
+        await self._pause(0.4)
+        removed = self._deployments.pop(slice_id, None)
+        if removed is not None:
+            logger.info("Withdrew %d flow rule(s) for %s", len(removed.flow_rules), slice_id[:8])
         return True
 
+    async def _pause(self, seconds: float) -> None:
+        """Sleep for a scaled, slightly jittered interval."""
+        scale = settings.sdn_step_scale
+        if scale <= 0:
+            return
+        await asyncio.sleep((seconds + random.uniform(0.0, seconds * 0.4)) * scale)
+
+    def get_deployment(self, slice_id: str) -> DeploymentRecord | None:
+        return self._deployments.get(slice_id)
+
+    def get_flow_rules(self, slice_id: str) -> list[dict]:
+        """The flow rules currently installed for a slice."""
+        record = self._deployments.get(slice_id)
+        return [rule.as_dict() for rule in record.flow_rules] if record else []
+
     def get_controller_status(self) -> dict:
-        """Get the current status of the mock SDN controller."""
+        """Controller health for the system-status endpoint."""
         return {
             "name": self.controller_name,
             "version": self.controller_version,
             "connected": self._is_connected,
-            "status": "operational",
+            "status": "operational" if self._is_connected else "disconnected",
+            "datapaths": len(DATAPATHS),
+            "active_deployments": len(self._deployments),
+            "total_deployments": self.deploy_count,
+            "failed_deployments": self.failure_count,
         }
 
+    def set_connected(self, connected: bool) -> None:
+        """Simulate the controller going up or down."""
+        self._is_connected = connected
+        logger.warning("Controller connection set to %s", connected)
 
-# Global singleton instance
+
 sdn_controller = MockSDNController()

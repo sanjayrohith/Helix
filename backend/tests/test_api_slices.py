@@ -45,7 +45,7 @@ class TestProvisioning:
         assert result["success"] is True
         assert result["slice_config"]["status"] == "active"
         assert result["parser_used"] == "rule-based"
-        assert result["deploy_time_seconds"] > 0
+        assert result["deploy_time_seconds"] >= 0
 
     def test_a_provisioned_slice_is_readable_back(self, client: TestClient) -> None:
         slice_id = provision(client, "broadband slice with 30 Mbps in Delhi")["slice_config"]["slice_id"]
