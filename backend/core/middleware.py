@@ -20,6 +20,33 @@ logger = get_logger("http")
 QUIET_PATHS = frozenset({"/health", "/metrics", "/docs", "/redoc", "/openapi.json"})
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Attach the response headers a security scanner checks for first.
+
+    HELIX is a JSON API with no server-rendered HTML, so most of the
+    classic web security headers (CSP, X-Frame-Options) are defence in
+    depth rather than closing an active hole here - but "this is just an
+    API" is exactly the reasoning that leaves an admin endpoint one
+    misconfigured reverse proxy away from being framed or content-sniffed.
+    Setting them costs nothing and is what a reviewer expects to see.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "no-referrer")
+        response.headers.setdefault(
+            "Permissions-Policy", "geolocation=(), microphone=(), camera=()"
+        )
+        # Only meaningful over HTTPS; harmless to set unconditionally since
+        # browsers ignore it on a plain HTTP response.
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=63072000; includeSubDomains"
+        )
+        return response
+
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     """Attach a correlation id to every request and log its outcome.
 
@@ -107,7 +134,12 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                         "detail": (
                             f"Rate limit exceeded: {self.limit} write requests per "
                             f"{self.window_seconds:.0f}s. Retry in {retry_after}s."
-                        )
+                        ),
+                        "code": "rate_limited",
+                        # Set here rather than left to the error envelope: this
+                        # response never reaches RequestContextMiddleware, since
+                        # the limiter sits below it and returns directly.
+                        "request_id": request_id_var.get(),
                     },
                     headers={"Retry-After": str(retry_after)},
                 )
@@ -125,3 +157,6 @@ def install_middleware(app) -> None:
             window_seconds=60.0,
         )
     app.add_middleware(RequestContextMiddleware)
+    # Outermost: applies to every response, including one a lower
+    # middleware short-circuited (a 429 from the rate limiter, for example).
+    app.add_middleware(SecurityHeadersMiddleware)
