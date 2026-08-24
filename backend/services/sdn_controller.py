@@ -6,7 +6,6 @@ import random
 
 from models.slice_models import SliceConfig
 
-
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

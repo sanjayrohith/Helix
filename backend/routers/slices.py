@@ -1,23 +1,20 @@
 """API router for slice management endpoints."""
 
 import time
-from typing import List
 
 from fastapi import APIRouter, HTTPException
 
 from models.slice_models import (
-    SliceIntent,
     SliceConfig,
     SliceDeploymentResult,
+    SliceIntent,
     SliceStats,
-    ConflictReport,
 )
-from services.slice_registry import slice_registry
-from services.intent_parser import intent_parser
-from services.conflict_detector import conflict_detector
-from services.sdn_controller import sdn_controller
 from routers.websocket import manager
-
+from services.conflict_detector import conflict_detector
+from services.intent_parser import intent_parser
+from services.sdn_controller import sdn_controller
+from services.slice_registry import slice_registry
 
 router = APIRouter(prefix="/api/slices", tags=["slices"])
 
@@ -42,7 +39,7 @@ async def provision_slice(intent: SliceIntent):
         # Step 1: Parse intent using Groq LLM
         slice_config = intent_parser.parse_intent(intent.intent)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse intent: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Failed to parse intent: {e}") from e
 
     # Step 2: Run conflict detection
     conflict_report = conflict_detector.detect_conflicts(slice_config)
@@ -74,8 +71,8 @@ async def provision_slice(intent: SliceIntent):
         deployment_success = await sdn_controller.deploy_slice(slice_config)
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"SDN controller deployment failed: {str(e)}"
-        )
+            status_code=500, detail=f"SDN controller deployment failed: {e}"
+        ) from e
 
     if deployment_success:
         slice_config.status = "active"
@@ -101,7 +98,7 @@ async def provision_slice(intent: SliceIntent):
     )
 
 
-@router.get("", response_model=List[SliceConfig])
+@router.get("", response_model=list[SliceConfig])
 async def get_all_slices():
     """
     Retrieve all network slices from the registry.

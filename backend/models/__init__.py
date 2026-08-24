@@ -1,10 +1,10 @@
 """Models package for STRIX."""
 
 from .slice_models import (
-    SliceIntent,
-    SliceConfig,
     ConflictReport,
+    SliceConfig,
     SliceDeploymentResult,
+    SliceIntent,
     SliceStats,
     WebSocketMessage,
 )

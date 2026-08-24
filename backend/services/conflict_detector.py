@@ -1,7 +1,7 @@
 """Conflict detection engine for validating slice configurations."""
 
-from models.slice_models import SliceConfig, ConflictReport
-from services.slice_registry import slice_registry, TOTAL_BANDWIDTH_CAPACITY
+from models.slice_models import ConflictReport, SliceConfig
+from services.slice_registry import TOTAL_BANDWIDTH_CAPACITY, slice_registry
 
 
 class ConflictDetector:
@@ -69,9 +69,9 @@ class ConflictDetector:
                 has_conflict=True,
                 conflict_type="arp",
                 details=(
-                    f"ARP priority conflict: ARP=1 is already assigned to another critical slice. "
-                    f"Only one slice with highest priority (ARP=1) can be active for critical services "
-                    f"to ensure preemption capabilities."
+                    "ARP priority conflict: ARP=1 is already assigned to another critical slice. "
+                    "Only one slice with highest priority (ARP=1) can be active for critical services "
+                    "to ensure preemption capabilities."
                 ),
                 suggestions=[
                     "Use ARP priority 2 for this slice",

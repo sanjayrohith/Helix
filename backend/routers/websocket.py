@@ -1,12 +1,9 @@
 """WebSocket router for real-time slice updates."""
 
-import json
-from typing import Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from models.slice_models import WebSocketMessage
-
 
 router = APIRouter()
 
@@ -15,7 +12,7 @@ class ConnectionManager:
     """Manages WebSocket connections for broadcasting slice updates."""
 
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: set[WebSocket] = set()
 
     async def connect(self, websocket: WebSocket):
         """Accept a new WebSocket connection."""

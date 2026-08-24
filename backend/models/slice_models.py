@@ -1,7 +1,8 @@
 """Pydantic models for STRIX 5G Network Slicing system."""
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -60,7 +61,7 @@ class ConflictReport(BaseModel):
     """Conflict detection report for slice provisioning."""
 
     has_conflict: bool = Field(..., description="Whether a conflict was detected")
-    conflict_type: Optional[Literal["bandwidth", "snssai", "arp", "regulatory"]] = (
+    conflict_type: Literal["bandwidth", "snssai", "arp", "regulatory"] | None = (
         Field(None, description="Type of conflict detected")
     )
     details: str = Field(..., description="Human-readable conflict description")

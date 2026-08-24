@@ -4,12 +4,11 @@ HELIX - 5G Intent-Based Network Slicing System
 Main FastAPI application entry point.
 """
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
 
 from routers import slices_router, websocket_router
-
 
 # Load environment variables
 load_dotenv()

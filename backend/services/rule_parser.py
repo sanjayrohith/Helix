@@ -14,7 +14,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from core.telecom import (
     DEFAULT_PROFILE,
@@ -234,7 +234,7 @@ class RuleBasedIntentParser:
 
         config["slice_id"] = str(uuid.uuid4())
         config["status"] = "pending"
-        config["created_at"] = datetime.now(timezone.utc)
+        config["created_at"] = datetime.now(UTC)
         return config, trace
 
     # --- field extraction helpers -------------------------------------------

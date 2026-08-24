@@ -2,7 +2,6 @@
 
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from core.config import settings
 from models.slice_models import SliceConfig, SliceStats
@@ -85,7 +84,7 @@ class SliceRegistry:
         self._slices[slice_config.slice_id] = slice_config
         return slice_config
 
-    def get_slice(self, slice_id: str) -> Optional[SliceConfig]:
+    def get_slice(self, slice_id: str) -> SliceConfig | None:
         """Retrieve a slice by ID."""
         return self._slices.get(slice_id)
 
@@ -93,7 +92,7 @@ class SliceRegistry:
         """Get all slices in the registry."""
         return list(self._slices.values())
 
-    def delete_slice(self, slice_id: str) -> Optional[SliceConfig]:
+    def delete_slice(self, slice_id: str) -> SliceConfig | None:
         """Remove a slice from the registry."""
         return self._slices.pop(slice_id, None)
 
@@ -122,7 +121,7 @@ class SliceRegistry:
         )
 
     def check_snssai_exists(
-        self, sst: int, sd: str, exclude_slice_id: Optional[str] = None
+        self, sst: int, sd: str, exclude_slice_id: str | None = None
     ) -> bool:
         """Check if SST+SD combination already exists."""
         for slice_id, slice_config in self._slices.items():
@@ -136,7 +135,7 @@ class SliceRegistry:
                 return True
         return False
 
-    def has_critical_arp_one(self, exclude_slice_id: Optional[str] = None) -> bool:
+    def has_critical_arp_one(self, exclude_slice_id: str | None = None) -> bool:
         """Check if ARP priority 1 is already used by a critical slice."""
         for slice_id, slice_config in self._slices.items():
             if exclude_slice_id and slice_id == exclude_slice_id:

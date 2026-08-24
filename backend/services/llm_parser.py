@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from core.config import settings
 from core.logging_config import get_logger
@@ -185,7 +185,7 @@ class LLMIntentParser:
 
         config["slice_id"] = str(uuid.uuid4())
         config["status"] = "pending"
-        config["created_at"] = datetime.now(timezone.utc)
+        config["created_at"] = datetime.now(UTC)
         return config
 
 
