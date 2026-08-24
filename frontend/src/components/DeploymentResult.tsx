@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { SliceDeploymentResult } from '../types/slice';
 import { SST_NAMES } from '../types/slice';
 import { ConflictAlert } from './ConflictAlert';
@@ -5,112 +6,146 @@ import { ConflictAlert } from './ConflictAlert';
 interface DeploymentResultProps {
   result: SliceDeploymentResult;
   onDismiss: () => void;
+  onInspect?: (sliceId: string) => void;
 }
 
-export function DeploymentResult({ result, onDismiss }: DeploymentResultProps) {
-  const { success, slice_config, conflict_report, deploy_time_seconds, message } = result;
+function ParseProvenance({ result }: { result: SliceDeploymentResult }) {
+  const [open, setOpen] = useState(false);
+  const trace = result.parse_trace;
 
-  if (!success && conflict_report.has_conflict) {
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.02] px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 text-[11px]">
+        <span className="rounded bg-white/10 px-1.5 py-0.5 font-mono text-slate-300">
+          parsed by {result.parser_used}
+        </span>
+        {result.parse_fallback_reason && (
+          <span
+            className="rounded bg-amber-300/20 px-1.5 py-0.5 font-mono text-amber-100"
+            title={result.parse_fallback_reason}
+          >
+            LLM unavailable, used the deterministic parser
+          </span>
+        )}
+        {trace?.matched_profile && (
+          <span className="font-mono text-slate-400">
+            matched the {trace.matched_profile} profile
+          </span>
+        )}
+        {trace && (
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            className="ml-auto text-cyan hover:text-cyan-100"
+          >
+            {open ? 'Hide reasoning' : 'How was this derived?'}
+          </button>
+        )}
+      </div>
+
+      {open && trace && (
+        <dl className="mt-2 space-y-1 border-l-2 border-white/10 pl-3">
+          {Object.entries(trace.derived).map(([field, reason]) => (
+            <div key={field} className="flex gap-2 text-[11px]">
+              <dt className="shrink-0 font-mono text-cyan/80">{field}</dt>
+              <dd className="text-slate-300">{reason}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+export function DeploymentResult({ result, onDismiss, onInspect }: DeploymentResultProps) {
+  const { success, slice_config: config, conflict_report: report, deploy_time_seconds } = result;
+
+  const dismissButton = (
+    <button
+      onClick={onDismiss}
+      className="absolute right-3 top-3 z-10 text-slate-400 transition-colors hover:text-slate-200"
+      aria-label="Dismiss"
+    >
+      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    </button>
+  );
+
+  if (!success) {
     return (
-      <div className="mb-6 relative">
-        <button
-          onClick={onDismiss}
-          className="absolute top-2 right-2 text-slate-400 hover:text-slate-200 z-10"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-        <ConflictAlert conflict={conflict_report} />
-        <div className="mt-2 text-slate-400 text-xs">
-          Processing time: {deploy_time_seconds.toFixed(2)}s
+      <div className="relative mb-6">
+        {dismissButton}
+        <ConflictAlert conflict={report} />
+        <ParseProvenance result={result} />
+        <div className="mt-2 font-mono text-xs text-slate-400">
+          Evaluated in {deploy_time_seconds.toFixed(2)}s
         </div>
       </div>
     );
   }
 
   return (
-    <div className="mb-6 bg-emerald-300/10 border border-emerald-200/30 rounded-2xl p-5 relative backdrop-blur-sm">
-      <button
-        onClick={onDismiss}
-        className="absolute top-2 right-2 text-slate-400 hover:text-slate-200"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+    <div className="relative mb-6 rounded-2xl border border-emerald-200/30 bg-emerald-300/10 p-5 backdrop-blur-sm">
+      {dismissButton}
+
+      <div className="mb-4 flex items-start gap-3">
+        <svg
+          className="mt-0.5 h-6 w-6 shrink-0 text-success"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
         </svg>
-      </button>
-
-      <div className="flex items-start gap-3 mb-4">
-        <div className="flex-shrink-0">
-          <svg
-            className="w-6 h-6 text-success"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
+        <div className="min-w-0">
+          <h4 className="font-syne font-semibold text-emerald-200">{config.name}</h4>
+          <p className="mt-0.5 text-xs text-slate-300">
+            Deployed and activated in {deploy_time_seconds.toFixed(2)}s
+          </p>
+        </div>
+        {onInspect && (
+          <button
+            onClick={() => onInspect(config.slice_id)}
+            className="ml-auto mr-8 shrink-0 rounded-lg border border-white/15 px-3 py-1.5 font-syne text-xs text-slate-200 transition-colors hover:border-cyan/40 hover:text-white"
           >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </div>
-        <div>
-          <h4 className="text-emerald-200 font-semibold">Slice Deployed Successfully</h4>
-          <p className="text-slate-300 text-sm">{message}</p>
-        </div>
+            Inspect
+          </button>
+        )}
       </div>
 
-      <div className="bg-[#081123]/90 border border-white/10 rounded-xl p-4">
-        <h5 className="text-slate-100 font-medium mb-3">Generated Configuration</h5>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-          <ConfigRow label="Slice ID" value={slice_config.slice_id.slice(0, 8) + '...'} mono />
-          <ConfigRow label="Name" value={slice_config.name} />
-          <ConfigRow label="S-NSSAI SST" value={`${slice_config.sst} (${SST_NAMES[slice_config.sst]})`} mono />
-          <ConfigRow label="S-NSSAI SD" value={slice_config.sd} mono />
-          <ConfigRow label="5QI" value={slice_config.qos_5qi.toString()} mono />
-          <ConfigRow label="ARP Priority" value={slice_config.arp_priority.toString()} mono />
-          <ConfigRow label="Guaranteed BR" value={`${slice_config.guaranteed_bitrate_mbps} Mbps`} mono />
-          <ConfigRow label="Max BR" value={`${slice_config.max_bitrate_mbps} Mbps`} mono />
-          <ConfigRow label="Latency" value={`${slice_config.latency_ms} ms`} mono />
-          <ConfigRow label="Security" value={slice_config.security_level} />
-          <ConfigRow label="Isolation" value={slice_config.isolation} />
-          <ConfigRow label="Device Count" value={slice_config.device_count.toLocaleString()} mono />
-          <ConfigRow label="Use Case" value={slice_config.use_case} />
-          <ConfigRow label="Location" value={slice_config.location} />
-          <ConfigRow label="Status" value={slice_config.status} highlight />
-        </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm sm:grid-cols-4">
+        <Field label="S-NSSAI" value={`SST=${config.sst} / ${config.sd}`} />
+        <Field label="Type" value={SST_NAMES[config.sst] ?? String(config.sst)} />
+        <Field label="5QI" value={String(config.qos_5qi)} />
+        <Field label="ARP" value={String(config.arp_priority)} />
+        <Field label="GBR" value={`${config.guaranteed_bitrate_mbps} Mbps`} />
+        <Field label="Max" value={`${config.max_bitrate_mbps} Mbps`} />
+        <Field label="Latency" value={`${config.latency_ms} ms`} />
+        <Field label="Devices" value={config.device_count.toLocaleString()} />
       </div>
 
-      <div className="mt-3 text-slate-400 text-xs">
-        Deployment time: {deploy_time_seconds.toFixed(2)}s
-      </div>
+      {report.findings.length > 0 && (
+        <div className="mt-3">
+          <ConflictAlert conflict={report} />
+        </div>
+      )}
+
+      <ParseProvenance result={result} />
     </div>
   );
 }
 
-function ConfigRow({
-  label,
-  value,
-  mono = false,
-  highlight = false,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  highlight?: boolean;
-}) {
+function Field({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <span className="text-slate-400">{label}:</span>
-      <span
-        className={`ml-2 ${mono ? 'font-mono' : ''} ${
-          highlight ? 'text-emerald-200 font-medium' : 'text-slate-100'
-        }`}
-      >
-        {value}
-      </span>
+      <div className="text-[10px] uppercase tracking-[0.12em] text-slate-400">{label}</div>
+      <div className="truncate font-mono text-slate-100">{value}</div>
     </div>
   );
 }
