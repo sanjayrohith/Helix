@@ -1,6 +1,7 @@
 """Routers package for HELIX."""
 
 from .events import router as events_router
+from .exports import router as exports_router
 from .slices import router as slices_router
 from .system import metrics_router
 from .system import router as system_router
@@ -14,6 +15,7 @@ __all__ = [
     "telemetry_router",
     "events_router",
     "topology_router",
+    "exports_router",
     "system_router",
     "metrics_router",
     "websocket_router",
