@@ -418,7 +418,9 @@ helix/
 │
 ├── 📄 docs/
 │   ├── ARCHITECTURE.md             # How it fits together, and why
-│   └── API.md                      # Full endpoint reference
+│   ├── API.md                      # Full endpoint reference
+│   ├── SECURITY.md                 # Threat model, auth, what's out of scope
+│   └── PERFORMANCE.md              # Load-test baselines and the one real optimisation
 ├── scripts/smoke_test.py           # End-to-end verification
 ├── .github/workflows/ci.yml        # Lint, test, build, smoke
 ├── Makefile                        # make help

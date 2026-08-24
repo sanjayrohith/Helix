@@ -40,8 +40,12 @@ after the fact from `GET /api/events`.
 | --- | --- |
 | `config.py` | Every tunable, resolved once from the environment |
 | `logging_config.py` | Console and JSON formatters, request correlation ids |
-| `middleware.py` | Correlation, timing, sliding-window rate limiting |
+| `middleware.py` | Correlation, timing, sliding-window rate limiting, body-size limit, security headers |
 | `telecom.py` | 3GPP tables: 5QI characteristics, ARP bands, use-case profiles |
+| `auth.py` | API-key authentication, `read`/`write` scopes |
+| `errors.py` | Global exception handlers, one JSON envelope for every error |
+| `etag.py` | Content-hash `ETag` generation and `If-Match` comparison (RFC 7232) |
+| `pagination.py` | Offset/limit pagination and RFC 5988 `Link` headers |
 
 `telecom.py` is the single source of truth for standards data. The parser, the
 conflict engine and the exporters all read from it, so a change to a 5QI's
@@ -64,6 +68,14 @@ packet delay budget propagates everywhere at once.
 | `audit_log.py` | Append-only event journal |
 | `metrics.py` | Prometheus exposition |
 | `exporters.py` | Open5GS, Kubernetes, S-NSSAI, flow-rule output |
+| `idempotency.py` | TTL-based cache backing `Idempotency-Key` on provisioning |
+
+### `storage/` — persistence
+
+| Module | Responsibility |
+| --- | --- |
+| `sqlite_store.py` | Slice and audit-event persistence |
+| `migrations.py` | Forward-only, `PRAGMA user_version`-tracked schema migrations |
 
 ## Design decisions
 
@@ -146,6 +158,59 @@ code and less indirection than SQLAlchemy would be here. Rows that fail to
 validate after a schema change are skipped with a warning rather than
 crashing startup.
 
+### Auth, idempotency and concurrency are all opt-in the same way
+
+`HELIX_API_KEYS` unset, `Idempotency-Key` header absent, `If-Match` header
+absent: all three features are silently no-ops, and the pre-existing
+behavior (unauthenticated, every request provisions independently, last
+write wins) is preserved exactly. This is the same pattern the LLM parser
+already used - a demo, `make dev`, and the test suite need zero configuration
+to keep working, and a real deployment opts into each guarantee it actually
+needs rather than being forced into all of them at once.
+
+### A body-size limit belongs before the app runs, not inside it
+
+The first implementation of `MaxBodySizeMiddleware` wrapped `receive()` and
+raised mid-stream when too many bytes arrived, relying on FastAPI's narrow
+`except HTTPException: raise` carve-out in its body-parsing code to turn that
+into a clean `413`. It didn't work: with two `BaseHTTPMiddleware` layers
+between this middleware and the router, each running the downstream app in
+its own `anyio` task group, the exception's type fidelity didn't reliably
+survive two nested task-group re-raises by the time FastAPI's routing code
+saw it - it consistently came back as a generic `400` instead. The fix that
+actually works is simpler than the one that didn't: check the declared
+`Content-Length` before calling into the rest of the app at all, so there is
+no nested call stack for an exception to survive crossing. It also matches
+how a real deployment already handles this at the reverse proxy layer
+(nginx's `client_max_body_size`) - HELIX's own check is the in-process
+backstop, not the primary defence.
+
+### A real migration runner instead of `CREATE TABLE IF NOT EXISTS`
+
+The original schema setup ran one `executescript()` on every startup, which
+works until the schema needs to change under an existing database - there
+was no way to add a column or index without either a manual `ALTER TABLE` or
+wiping the data. `storage/migrations.py` tracks the schema version in
+SQLite's own `PRAGMA user_version` and applies whatever hasn't run yet, in
+order, on every startup. Each migration is a plain SQL string in an ordered
+tuple - no framework, no down-migrations (a fresh forward migration is the
+answer to a mistake, matching how this project already treats a broken
+config: fix and move forward, not roll back).
+
+### Distinguishing a reachable `None` from a provably unreachable one
+
+Concurrent-safety bugs found via mypy's Optional-narrowing got two different
+fixes depending on whether the null case was actually reachable. In
+`DELETE /api/slices/{id}`, the code awaits the SDN controller between
+checking a slice exists and deleting it from the registry - a second
+concurrent delete can genuinely win that race, so the fix is a real `404`
+check. In `_apply_update`, `suspend_slice` and `resume_slice`, there is no
+`await` between the same kind of existence check and the following registry
+call, so the registry cannot have changed underneath them - those keep a
+documented `assert` instead of unneeded error-handling for a state that
+cannot occur. The type checker flagged both shapes identically; only reading
+the actual code told them apart.
+
 ### YAML without PyYAML
 
 The exporters emit shallow, fully-known documents and never read YAML back in,
@@ -193,6 +258,11 @@ Every knob is an environment variable with a working default; see
 | `HELIX_TELEMETRY_OUTAGE_RATE` | `0.004` | Set to 0 for a deterministic simulator |
 | `HELIX_SDN_STEP_SCALE` | `1.0` | Set to 0 for instant deployments |
 | `HELIX_RATE_LIMIT_PER_MINUTE` | `60` | Write requests per client; 0 disables |
+| `HELIX_API_KEYS` | unset | `key:scope[:label]` list; enables auth on every route once set |
+| `HELIX_MAX_BODY_BYTES` | `1048576` | Request body size limit; 0 disables |
+
+See [SECURITY.md](SECURITY.md) for the full threat model behind the
+security-related settings.
 
 ## Testing
 
