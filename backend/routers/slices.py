@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 
 from core.auth import Principal, ReadScope, WriteScope
 from core.config import settings
@@ -25,6 +25,7 @@ from models.slice_models import (
 from routers.websocket import manager
 from services.audit_log import audit_log
 from services.conflict_detector import conflict_detector
+from services.idempotency import provision_idempotency_cache
 from services.intent_parser import intent_parser
 from services.sdn_controller import sdn_controller
 from services.slice_registry import slice_registry
@@ -37,14 +38,39 @@ router = APIRouter(prefix="/api/slices", tags=["slices"])
 
 @router.post("/provision", response_model=SliceDeploymentResult)
 async def provision_slice(
-    intent: SliceIntent, principal: Principal = WriteScope
+    intent: SliceIntent,
+    principal: Principal = WriteScope,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        description=(
+            "Optional. Retrying the same key returns the original result "
+            "instead of provisioning a second slice."
+        ),
+    ),
 ) -> SliceDeploymentResult:
     """Provision a network slice from a natural-language intent.
 
     Parses the intent, runs admission control, and deploys to the SDN
     controller when no blocking conflict is found. Advisory findings are
     reported but do not prevent deployment.
+
+    A client-supplied Idempotency-Key makes a retried request (a timeout, a
+    double-click, a proxy retry) safe: the first request with a given key
+    provisions normally, and every subsequent request with that same key -
+    scoped to the calling principal, so one caller's key cannot return
+    another caller's result - returns the cached result instead of
+    provisioning a second slice.
     """
+    # Scope the cache key to the principal: two different callers who happen
+    # to choose the same idempotency key must not see each other's slices.
+    cache_key = f"{principal.actor}:{idempotency_key}" if idempotency_key else None
+    if cache_key:
+        cached = provision_idempotency_cache.get(cache_key)
+        if cached is not None:
+            logger.info("Idempotent replay for key '%s'", idempotency_key)
+            return cached
+
     start_time = time.time()
 
     try:
@@ -85,7 +111,7 @@ async def provision_slice(
                 "auto_remediation": report.auto_remediation,
             }
         )
-        return SliceDeploymentResult(
+        result = SliceDeploymentResult(
             success=False,
             slice_config=config,
             conflict_report=report,
@@ -98,6 +124,9 @@ async def provision_slice(
             parse_fallback_reason=outcome.fallback_reason,
             parse_trace=outcome.trace,
         )
+        if cache_key:
+            provision_idempotency_cache.set(cache_key, result)
+        return result
 
     try:
         deployed = await sdn_controller.deploy_slice(config)
@@ -130,7 +159,7 @@ async def provision_slice(
     else:
         config.status = "rejected"
 
-    return SliceDeploymentResult(
+    result = SliceDeploymentResult(
         success=deployed,
         slice_config=config,
         conflict_report=report,
@@ -144,6 +173,9 @@ async def provision_slice(
         parse_fallback_reason=outcome.fallback_reason,
         parse_trace=outcome.trace,
     )
+    if cache_key:
+        provision_idempotency_cache.set(cache_key, result)
+    return result
 
 
 @router.post("/simulate", response_model=SliceSimulationResult)

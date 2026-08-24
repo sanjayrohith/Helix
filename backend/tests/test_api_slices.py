@@ -150,6 +150,48 @@ class TestLifecycle:
         assert client.get(f"/api/slices/{slice_id}").status_code == 404
 
 
+class TestIdempotency:
+    def test_a_repeated_key_returns_the_same_slice(self, client: TestClient) -> None:
+        body = {"intent": "iot slice with 15 Mbps in Pune"}
+        headers = {"Idempotency-Key": "retry-1"}
+        first = client.post("/api/slices/provision", json=body, headers=headers).json()
+        second = client.post("/api/slices/provision", json=body, headers=headers).json()
+        assert first["slice_config"]["slice_id"] == second["slice_config"]["slice_id"]
+
+    def test_a_repeated_key_does_not_provision_twice(self, client: TestClient) -> None:
+        body = {"intent": "iot slice with 16 Mbps in Nashik"}
+        headers = {"Idempotency-Key": "retry-2"}
+        before = len(client.get("/api/slices").json())
+        client.post("/api/slices/provision", json=body, headers=headers)
+        client.post("/api/slices/provision", json=body, headers=headers)
+        after = len(client.get("/api/slices").json())
+        assert after == before + 1
+
+    def test_a_different_key_provisions_a_new_slice(self, client: TestClient) -> None:
+        body = {"intent": "iot slice with 17 Mbps in Kochi"}
+        first = client.post(
+            "/api/slices/provision", json=body, headers={"Idempotency-Key": "retry-a"}
+        ).json()
+        second = client.post(
+            "/api/slices/provision", json=body, headers={"Idempotency-Key": "retry-b"}
+        ).json()
+        assert first["slice_config"]["slice_id"] != second["slice_config"]["slice_id"]
+
+    def test_no_key_at_all_is_never_deduplicated(self, client: TestClient) -> None:
+        body = {"intent": "iot slice with 18 Mbps in Indore"}
+        first = client.post("/api/slices/provision", json=body).json()
+        second = client.post("/api/slices/provision", json=body).json()
+        assert first["slice_config"]["slice_id"] != second["slice_config"]["slice_id"]
+
+    def test_a_conflicting_result_is_also_cached(self, client: TestClient) -> None:
+        body = {"intent": "broadband slice with 50 Gbps for the campus"}
+        headers = {"Idempotency-Key": "retry-conflict"}
+        first = client.post("/api/slices/provision", json=body, headers=headers).json()
+        second = client.post("/api/slices/provision", json=body, headers=headers).json()
+        assert first["success"] is False
+        assert first == second
+
+
 class TestQueries:
     def test_filters_narrow_the_listing(self, client: TestClient) -> None:
         provision(client, "iot slice for smart meters with 10 Mbps in Nagpur")
