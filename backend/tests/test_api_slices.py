@@ -143,6 +143,33 @@ class TestLifecycle:
         client.post(f"/api/slices/{slice_id}/suspend")
         assert client.post(f"/api/slices/{slice_id}/suspend").status_code == 409
 
+    def test_concurrent_delete_of_the_same_slice_returns_404_not_a_crash(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # DELETE awaits the SDN controller between checking the slice exists
+        # and actually removing it from the registry, so a second concurrent
+        # DELETE for the same slice can win that race and delete it first.
+        # Simulated here by having the controller itself delete the slice as
+        # a side effect during that await, mimicking what a second request
+        # completing in between would do.
+        from routers import slices as slices_router
+
+        slice_id = provision(client, "iot slice with 10 Mbps in Pune")["slice_config"][
+            "slice_id"
+        ]
+        original_remove = slices_router.sdn_controller.remove_slice
+
+        async def remove_and_race(sid: str) -> bool:
+            slices_router.slice_registry.delete_slice(sid)
+            return await original_remove(sid)
+
+        monkeypatch.setattr(slices_router.sdn_controller, "remove_slice", remove_and_race)
+
+        response = client.delete(f"/api/slices/{slice_id}")
+
+        assert response.status_code == 404
+        assert "already deleted" in response.json()["detail"]
+
     def test_delete_reports_the_bandwidth_it_released(self, client: TestClient) -> None:
         slice_id = provision(client, "iot slice with 15 Mbps in Pune")["slice_config"]["slice_id"]
         body = client.delete(f"/api/slices/{slice_id}").json()

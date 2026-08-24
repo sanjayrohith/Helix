@@ -337,6 +337,11 @@ async def _apply_update(
         )
 
     updated = slice_registry.update_slice(slice_id, changes)
+    # No await since the existence check above, so the slice cannot have
+    # been deleted out from under this update - unlike delete_slice()
+    # below, which awaits the SDN controller between its own check and the
+    # actual delete and has to handle the concurrent-delete case for real.
+    assert updated is not None
     audit_log.record_slice_event(
         "slice_updated",
         updated,
@@ -422,6 +427,7 @@ async def suspend_slice(
         )
 
     updated = slice_registry.set_status(slice_id, "pending")
+    assert updated is not None  # no await since the existence check above
     audit_log.record_slice_event(
         "slice_suspended",
         updated,
@@ -460,6 +466,7 @@ async def resume_slice(
 
     previous = existing.status
     updated = slice_registry.set_status(slice_id, "active")
+    assert updated is not None  # no await since the existence check above
     audit_log.record_slice_event(
         "slice_resumed", updated, f"'{updated.name}' resumed", actor=principal.actor
     )
@@ -481,6 +488,14 @@ async def delete_slice(slice_id: str, principal: Principal = WriteScope) -> dict
 
     await sdn_controller.remove_slice(slice_id)
     removed = slice_registry.delete_slice(slice_id)
+    if removed is None:
+        # A genuinely reachable race, not just a type-checker nitpick: this
+        # awaited the SDN controller between the existence check above and
+        # the delete itself, so a second concurrent DELETE for the same
+        # slice can legitimately win that race and get here first.
+        raise HTTPException(
+            status_code=404, detail=f"Slice '{slice_id}' was already deleted"
+        )
     topology_manager.unplace(slice_id)
     audit_log.record_slice_event(
         "slice_deleted", removed, f"'{removed.name}' deleted", actor=principal.actor
