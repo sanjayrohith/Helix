@@ -58,6 +58,15 @@ reset-db: ## Delete the local SQLite database
 	rm -f $(BACKEND)/data/helix.db $(BACKEND)/data/helix.db-wal $(BACKEND)/data/helix.db-shm
 	@echo "Database cleared; demo slices will be reseeded on next start."
 
+backup-db: ## Take a consistent live backup of the local database
+	$(PY) scripts/backup_db.py backup
+
+restore-db: ## Restore the local database: make restore-db FROM=path/to/backup.db
+	$(PY) scripts/backup_db.py restore --from $(FROM) --force
+
+verify-db: ## Check the local database's integrity and schema version
+	$(PY) scripts/backup_db.py verify $(BACKEND)/data/helix.db
+
 clean: ## Remove build artefacts and caches
 	rm -rf $(FRONT)/dist $(FRONT)/node_modules/.vite
 	find $(BACKEND) -type d -name __pycache__ -prune -exec rm -rf {} +
