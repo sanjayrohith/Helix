@@ -63,7 +63,8 @@ _LATENCY_RE = re.compile(
 _DEVICE_RE = re.compile(
     rf"{_NUMBER}\s*(k|m|thousand|million)?\s*"
     r"(devices?|sensors?|users?|endpoints?|terminals?|meters?|cameras?|nodes?|ues?|"
-    r"subscribers?|vehicles?|cars?|robots?|drones?|handsets?|clients?)",
+    r"subscribers?|vehicles?|cars?|robots?|drones?|handsets?|clients?|employees?|"
+    r"staff|workers?|students?|patients?|seats?|connections?|trackers?)",
     re.IGNORECASE,
 )
 _LOCATION_RE = re.compile(
