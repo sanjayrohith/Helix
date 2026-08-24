@@ -7,3 +7,4 @@ httpx>=0.27          # required by fastapi.testclient
 pyyaml>=6.0          # validates exporter output round-trips
 ruff>=0.4
 mypy>=1.10
+pre-commit>=3.7

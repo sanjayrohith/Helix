@@ -27,7 +27,7 @@ html body {
   -moz-osx-font-smoothing: grayscale;
   color: var(--color-text-primary);
   background-color: #060d1f !important;
-  background-image: 
+  background-image:
     radial-gradient(circle at 18% 20%, rgba(42, 223, 255, 0.18), transparent 34%),
     radial-gradient(circle at 85% 75%, rgba(59, 243, 162, 0.14), transparent 30%),
     linear-gradient(rgba(124, 170, 255, 0.085) 1px, transparent 1px),

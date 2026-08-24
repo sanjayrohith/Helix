@@ -623,7 +623,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - **Groq** - Lightning-fast LLM inference
-- **3GPP** - 5G standards and specifications  
+- **3GPP** - 5G standards and specifications
 - **FastAPI** - Modern Python web framework
 - **React** - UI component library
 - **Tailwind CSS** - Utility-first styling

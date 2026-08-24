@@ -6,8 +6,8 @@ interface StatsBarProps {
 }
 
 export function StatsBar({ stats, loading }: StatsBarProps) {
-  const bandwidthUsedPercent = stats 
-    ? (stats.total_bandwidth_used_mbps / 1000) * 100 
+  const bandwidthUsedPercent = stats
+    ? (stats.total_bandwidth_used_mbps / 1000) * 100
     : 0;
 
   return (
@@ -62,8 +62,8 @@ export function StatsBar({ stats, loading }: StatsBarProps) {
             <div className="stat-secondary">/ 1000 Mbps</div>
             {/* Progress bar */}
             <div className="progress-bar h-1.5 mt-3">
-              <div 
-                className="progress-bar-fill" 
+              <div
+                className="progress-bar-fill"
                 style={{ width: `${bandwidthUsedPercent}%` }}
               />
             </div>
