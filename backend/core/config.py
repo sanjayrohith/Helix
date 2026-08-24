@@ -71,6 +71,11 @@ class Settings:
         # the same "secure if configured, open otherwise" pattern already
         # used for the LLM parser, so a demo needs no setup.
         self.api_keys_raw: str = os.getenv("HELIX_API_KEYS", "")
+        # Reject a request body larger than this before fully reading it.
+        # 1 MiB comfortably covers every real HELIX payload (the largest is
+        # a 2000-character intent string plus JSON overhead) with headroom;
+        # 0 disables the check.
+        self.max_request_body_bytes: int = _get_int("HELIX_MAX_BODY_BYTES", 1_048_576)
 
         # --- Radio / transport capacity ------------------------------------
         self.total_bandwidth_mbps: float = _get_float("HELIX_TOTAL_BANDWIDTH_MBPS", 1000.0)
