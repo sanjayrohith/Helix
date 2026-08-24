@@ -1,67 +1,92 @@
-"""
-HELIX - 5G Intent-Based Network Slicing System
+"""HELIX - 5G Intent-Based Network Slicing System.
 
-Main FastAPI application entry point.
+FastAPI application entry point: wires configuration, logging, middleware,
+routers and the application lifespan.
 """
 
-from dotenv import load_dotenv
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import slices_router, websocket_router
+from core.config import settings
+from core.logging_config import configure_logging, get_logger
+from routers import slices_router, system_router, websocket_router
 
-# Load environment variables
-load_dotenv()
+configure_logging()
+logger = get_logger("app")
 
-# Create FastAPI application
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Start and stop background subsystems alongside the HTTP server."""
+    logger.info(
+        "%s v%s starting (env=%s, parser=%s, capacity=%.0f Mbps)",
+        settings.app_name,
+        settings.version,
+        settings.environment,
+        "llm" if settings.llm_available else "rule-based",
+        settings.total_bandwidth_mbps,
+    )
+    yield
+    logger.info("%s shutting down", settings.app_name)
+
+
 app = FastAPI(
-    title="HELIX",
-    description="5G Intent-Based Network Slicing System - Transform natural language into validated 5G network slice configurations",
-    version="1.0.0",
+    title=settings.app_name,
+    description=(
+        "5G Intent-Based Network Slicing System - transform natural language into "
+        "validated 5G network slice configurations."
+    ),
+    version=settings.version,
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
-# Configure CORS - allow all origins for development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
 app.include_router(slices_router)
+app.include_router(system_router)
 app.include_router(websocket_router)
 
 
-@app.get("/")
-async def root():
-    """Root endpoint with API information."""
+@app.get("/", tags=["system"])
+async def root() -> dict:
+    """Root endpoint listing the available API surface."""
     return {
-        "name": "HELIX",
+        "name": settings.app_name,
         "description": "5G Intent-Based Network Slicing System",
-        "version": "1.0.0",
+        "version": settings.version,
         "endpoints": {
             "provision_slice": "POST /api/slices/provision",
             "get_all_slices": "GET /api/slices",
             "get_slice": "GET /api/slices/{slice_id}",
             "delete_slice": "DELETE /api/slices/{slice_id}",
             "get_stats": "GET /api/slices/stats/summary",
+            "system_info": "GET /api/system/info",
+            "parser_status": "GET /api/system/parser",
             "websocket": "WS /ws",
             "docs": "GET /docs",
         },
     }
 
 
-@app.get("/health")
-async def health_check():
-    """Health check endpoint for container orchestration."""
-    return {"status": "healthy"}
+@app.get("/health", tags=["system"])
+async def health_check() -> dict:
+    """Liveness probe for container orchestration."""
+    return {"status": "healthy", "version": settings.version}
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=settings.host, port=settings.port)
