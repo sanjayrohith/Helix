@@ -33,3 +33,8 @@ npm-debug.log*
 .coverage
 htmlcov/
 .pytest_cache/
+
+# Local data
+*.db
+*.sqlite3
+data/

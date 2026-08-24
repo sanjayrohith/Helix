@@ -1,6 +1,23 @@
-"""Routers package for STRIX."""
+"""Routers package for HELIX."""
 
+from .events import router as events_router
+from .exports import router as exports_router
 from .slices import router as slices_router
-from .websocket import router as websocket_router, manager
+from .system import metrics_router
+from .system import router as system_router
+from .telemetry import router as telemetry_router
+from .topology import router as topology_router
+from .websocket import manager
+from .websocket import router as websocket_router
 
-__all__ = ["slices_router", "websocket_router", "manager"]
+__all__ = [
+    "slices_router",
+    "telemetry_router",
+    "events_router",
+    "topology_router",
+    "exports_router",
+    "system_router",
+    "metrics_router",
+    "websocket_router",
+    "manager",
+]

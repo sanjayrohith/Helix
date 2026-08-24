@@ -1,12 +1,9 @@
 """WebSocket router for real-time slice updates."""
 
-import json
-from typing import Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from models.slice_models import WebSocketMessage
-
 
 router = APIRouter()
 
@@ -15,7 +12,7 @@ class ConnectionManager:
     """Manages WebSocket connections for broadcasting slice updates."""
 
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: set[WebSocket] = set()
 
     async def connect(self, websocket: WebSocket):
         """Accept a new WebSocket connection."""
@@ -51,10 +48,28 @@ class ConnectionManager:
         message = WebSocketMessage(event="slice_deleted", data={"slice_id": slice_id})
         await self.broadcast(message)
 
+    async def broadcast_slice_updated(self, slice_data: dict):
+        """Broadcast a slice configuration change."""
+        message = WebSocketMessage(event="slice_updated", data=slice_data)
+        await self.broadcast(message)
+
     async def broadcast_conflict_detected(self, conflict_data: dict):
         """Broadcast a conflict detection event."""
         message = WebSocketMessage(event="conflict_detected", data=conflict_data)
         await self.broadcast(message)
+
+    async def broadcast_telemetry(self, payload: dict):
+        """Broadcast one telemetry interval to every connected dashboard."""
+        await self.broadcast(WebSocketMessage(event="telemetry", data=payload))
+
+    async def broadcast_sla_alert(self, payload: dict):
+        """Broadcast an SLA status change."""
+        await self.broadcast(WebSocketMessage(event="sla_alert", data=payload))
+
+    @property
+    def connection_count(self) -> int:
+        """How many dashboards are currently connected."""
+        return len(self.active_connections)
 
 
 # Global connection manager instance

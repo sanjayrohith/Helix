@@ -1,4 +1,6 @@
+import { useMemo } from 'react';
 import type { SliceConfig } from '../types/slice';
+import type { SlaEvaluation } from '../types/telemetry';
 import { SliceCard } from './SliceCard';
 
 interface SliceDashboardProps {
@@ -6,6 +8,8 @@ interface SliceDashboardProps {
   loading: boolean;
   onDeleteSlice: (sliceId: string) => void;
   deletingSliceId: string | null;
+  onSelectSlice?: (sliceId: string) => void;
+  slaEvaluations?: SlaEvaluation[];
 }
 
 export function SliceDashboard({
@@ -13,7 +17,13 @@ export function SliceDashboard({
   loading,
   onDeleteSlice,
   deletingSliceId,
+  onSelectSlice,
+  slaEvaluations = [],
 }: SliceDashboardProps) {
+  const slaBySlice = useMemo(
+    () => new Map(slaEvaluations.map((evaluation) => [evaluation.slice_id, evaluation])),
+    [slaEvaluations],
+  );
   if (loading) {
     return (
       <div className="slice-grid grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -92,6 +102,8 @@ export function SliceDashboard({
             slice={slice}
             onDelete={onDeleteSlice}
             deleting={deletingSliceId === slice.slice_id}
+            onSelect={onSelectSlice}
+            sla={slaBySlice.get(slice.slice_id)}
           />
         ))}
       </div>
