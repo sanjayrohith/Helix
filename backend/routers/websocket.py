@@ -48,6 +48,11 @@ class ConnectionManager:
         message = WebSocketMessage(event="slice_deleted", data={"slice_id": slice_id})
         await self.broadcast(message)
 
+    async def broadcast_slice_updated(self, slice_data: dict):
+        """Broadcast a slice configuration change."""
+        message = WebSocketMessage(event="slice_updated", data=slice_data)
+        await self.broadcast(message)
+
     async def broadcast_conflict_detected(self, conflict_data: dict):
         """Broadcast a conflict detection event."""
         message = WebSocketMessage(event="conflict_detected", data=conflict_data)

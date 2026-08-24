@@ -3,10 +3,13 @@
 from .event_models import AuditEvent, AuditQuery, EventSeverity, EventType
 from .lifecycle_models import SliceScaleRequest, SliceStatusChange, SliceUpdateRequest
 from .slice_models import (
+    ConflictFinding,
     ConflictReport,
     SliceConfig,
     SliceDeploymentResult,
     SliceIntent,
+    SliceSimulationRequest,
+    SliceSimulationResult,
     SliceStats,
     WebSocketMessage,
     utcnow,
@@ -24,6 +27,9 @@ __all__ = [
     "SliceIntent",
     "SliceConfig",
     "ConflictReport",
+    "ConflictFinding",
+    "SliceSimulationRequest",
+    "SliceSimulationResult",
     "SliceDeploymentResult",
     "SliceStats",
     "WebSocketMessage",

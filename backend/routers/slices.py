@@ -1,177 +1,340 @@
-"""API router for slice management endpoints."""
+"""API router for slice provisioning and lifecycle management."""
+
+from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
+from core.config import settings
+from core.logging_config import get_logger
+from models.lifecycle_models import (
+    SliceScaleRequest,
+    SliceStatusChange,
+    SliceUpdateRequest,
+)
 from models.slice_models import (
     SliceConfig,
     SliceDeploymentResult,
     SliceIntent,
+    SliceSimulationRequest,
+    SliceSimulationResult,
     SliceStats,
 )
 from routers.websocket import manager
+from services.audit_log import audit_log
 from services.conflict_detector import conflict_detector
 from services.intent_parser import intent_parser
 from services.sdn_controller import sdn_controller
 from services.slice_registry import slice_registry
 
+logger = get_logger("api.slices")
+
 router = APIRouter(prefix="/api/slices", tags=["slices"])
 
 
 @router.post("/provision", response_model=SliceDeploymentResult)
-async def provision_slice(intent: SliceIntent):
-    """
-    Provision a new network slice from natural language intent.
+async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
+    """Provision a network slice from a natural-language intent.
 
-    Process:
-    1. Parse intent using LLM to generate slice configuration
-    2. Run conflict detection against existing slices
-    3. If no conflicts, deploy to SDN controller
-    4. Broadcast update via WebSocket
-
-    Returns:
-        SliceDeploymentResult with success status, config, and any conflicts
+    Parses the intent, runs admission control, and deploys to the SDN
+    controller when no blocking conflict is found. Advisory findings are
+    reported but do not prevent deployment.
     """
     start_time = time.time()
 
     try:
-        # Step 1: Parse intent using Groq LLM
-        slice_config = intent_parser.parse_intent(intent.intent)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse intent: {e}") from e
+        outcome = intent_parser.parse(intent.intent)
+    except Exception as exc:
+        logger.warning("Intent parsing failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Failed to parse intent: {exc}") from exc
 
-    # Step 2: Run conflict detection
-    conflict_report = conflict_detector.detect_conflicts(slice_config)
+    config = outcome.config
+    audit_log.record_slice_event(
+        "slice_provision_requested",
+        config,
+        f"Provisioning requested for '{config.name}'",
+        detail={"parser": outcome.parser_used, "intent": intent.intent[:500]},
+    )
 
-    if conflict_report.has_conflict:
-        # Conflict detected - do NOT deploy
-        slice_config.status = "conflict"
-        deploy_time = time.time() - start_time
+    report = conflict_detector.detect_conflicts(config)
 
-        # Broadcast conflict event
+    if report.has_conflict:
+        config.status = "conflict"
+        audit_log.record_slice_event(
+            "conflict_detected",
+            config,
+            f"'{config.name}' rejected: {report.conflict_type} conflict",
+            severity="warning",
+            detail={
+                "conflict_types": [f.conflict_type for f in report.blocking_findings],
+                "auto_remediation": report.auto_remediation,
+            },
+        )
         await manager.broadcast_conflict_detected(
             {
-                "slice_name": slice_config.name,
-                "conflict_type": conflict_report.conflict_type,
-                "details": conflict_report.details,
+                "slice_name": config.name,
+                "conflict_type": report.conflict_type,
+                "details": report.details,
+                "auto_remediation": report.auto_remediation,
             }
         )
-
         return SliceDeploymentResult(
             success=False,
-            slice_config=slice_config,
-            conflict_report=conflict_report,
-            deploy_time_seconds=round(deploy_time, 2),
-            message=f"Slice provisioning failed due to {conflict_report.conflict_type} conflict.",
+            slice_config=config,
+            conflict_report=report,
+            deploy_time_seconds=round(time.time() - start_time, 2),
+            message=(
+                f"Provisioning blocked by {len(report.blocking_findings)} conflict(s). "
+                "See conflict_report.auto_remediation for a configuration that would deploy."
+            ),
+            parser_used=outcome.parser_used,
+            parse_fallback_reason=outcome.fallback_reason,
+            parse_trace=outcome.trace,
         )
 
-    # Step 3: No conflicts - deploy to SDN controller
     try:
-        deployment_success = await sdn_controller.deploy_slice(slice_config)
-    except Exception as e:
+        deployed = await sdn_controller.deploy_slice(config)
+    except Exception as exc:
+        audit_log.record_slice_event(
+            "controller_error", config, f"SDN deployment failed: {exc}", severity="error"
+        )
         raise HTTPException(
-            status_code=500, detail=f"SDN controller deployment failed: {e}"
-        ) from e
+            status_code=502, detail=f"SDN controller deployment failed: {exc}"
+        ) from exc
 
-    if deployment_success:
-        slice_config.status = "active"
-        slice_registry.add_slice(slice_config)
-
-        # Broadcast slice creation event
-        await manager.broadcast_slice_created(slice_config.model_dump(mode="json"))
+    if deployed:
+        config.status = "active"
+        slice_registry.add_slice(config)
+        audit_log.record_slice_event(
+            "slice_created",
+            config,
+            f"'{config.name}' activated ({config.guaranteed_bitrate_mbps:.0f} Mbps GBR)",
+            detail={"warnings": [f.conflict_type for f in report.warnings]},
+        )
+        await manager.broadcast_slice_created(config.model_dump(mode="json"))
     else:
-        slice_config.status = "rejected"
-
-    deploy_time = time.time() - start_time
+        config.status = "rejected"
 
     return SliceDeploymentResult(
-        success=deployment_success,
-        slice_config=slice_config,
-        conflict_report=conflict_report,
-        deploy_time_seconds=round(deploy_time, 2),
+        success=deployed,
+        slice_config=config,
+        conflict_report=report,
+        deploy_time_seconds=round(time.time() - start_time, 2),
         message=(
-            f"Slice '{slice_config.name}' successfully deployed and activated."
-            if deployment_success
-            else "Slice deployment was rejected by the SDN controller."
+            f"Slice '{config.name}' deployed and activated."
+            if deployed
+            else "The SDN controller rejected the slice."
         ),
+        parser_used=outcome.parser_used,
+        parse_fallback_reason=outcome.fallback_reason,
+        parse_trace=outcome.trace,
+    )
+
+
+@router.post("/simulate", response_model=SliceSimulationResult)
+async def simulate_slice(request: SliceSimulationRequest) -> SliceSimulationResult:
+    """Dry-run admission control without touching the network.
+
+    Answers 'would this intent deploy, and if not what would it take?' so an
+    operator can iterate on wording before committing to a change window.
+    """
+    try:
+        outcome = intent_parser.parse(request.intent)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Failed to parse intent: {exc}") from exc
+
+    config = outcome.config
+    report = conflict_detector.detect_conflicts(config)
+    in_use = slice_registry.get_total_active_bandwidth()
+
+    remediated_config = None
+    remediated_report = None
+    if request.apply_remediation and report.auto_remediation:
+        remediated_config = conflict_detector.apply_remediation(config, report)
+        remediated_report = conflict_detector.detect_conflicts(remediated_config)
+
+    return SliceSimulationResult(
+        would_deploy=not report.has_conflict,
+        slice_config=config,
+        conflict_report=report,
+        remediated_config=remediated_config,
+        remediated_report=remediated_report,
+        parser_used=outcome.parser_used,
+        capacity_before_mbps=round(in_use, 2),
+        capacity_after_mbps=round(in_use + config.guaranteed_bitrate_mbps, 2),
     )
 
 
 @router.get("", response_model=list[SliceConfig])
-async def get_all_slices():
-    """
-    Retrieve all network slices from the registry.
-
-    Returns:
-        List of all SliceConfig objects
-    """
-    return slice_registry.get_all_slices()
+async def get_all_slices(
+    use_case: str | None = Query(default=None, description="Filter by use-case category"),
+    location: str | None = Query(default=None, description="Filter by location"),
+    status: str | None = Query(default=None, description="Filter by lifecycle status"),
+) -> list[SliceConfig]:
+    """List provisioned slices, optionally filtered."""
+    slices = slice_registry.get_all_slices()
+    if use_case:
+        slices = [s for s in slices if s.use_case.lower() == use_case.lower()]
+    if location:
+        slices = [s for s in slices if s.location.lower() == location.lower()]
+    if status:
+        slices = [s for s in slices if s.status == status]
+    return slices
 
 
 @router.get("/stats/summary", response_model=SliceStats)
-async def get_slice_stats():
-    """
-    Get summary statistics for the slice registry.
-
-    Returns:
-        SliceStats with totals for slices, bandwidth, and conflicts
-    """
+async def get_slice_stats() -> SliceStats:
+    """Summary counters for the dashboard header."""
     return slice_registry.get_stats()
 
 
+@router.get("/stats/breakdown")
+async def get_slice_breakdown() -> dict:
+    """Group slices by SST, status, use case, location and isolation."""
+    return {
+        "capacity_mbps": settings.total_bandwidth_mbps,
+        "used_mbps": round(slice_registry.get_total_active_bandwidth(), 2),
+        "available_mbps": round(slice_registry.get_available_bandwidth(), 2),
+        **slice_registry.breakdown(),
+    }
+
+
 @router.get("/{slice_id}", response_model=SliceConfig)
-async def get_slice(slice_id: str):
-    """
-    Retrieve a specific slice by ID.
+async def get_slice(slice_id: str) -> SliceConfig:
+    """Retrieve a single slice by id."""
+    config = slice_registry.get_slice(slice_id)
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
+    return config
 
-    Args:
-        slice_id: UUID of the slice
 
-    Returns:
-        SliceConfig for the requested slice
+@router.patch("/{slice_id}", response_model=SliceConfig)
+async def update_slice(slice_id: str, request: SliceUpdateRequest) -> SliceConfig:
+    """Apply a partial update to a live slice, re-running admission control."""
+    existing = slice_registry.get_slice(slice_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
 
-    Raises:
-        404 if slice not found
-    """
-    slice_config = slice_registry.get_slice(slice_id)
-    if not slice_config:
+    changes = request.changes()
+    if not changes:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    # Validate the post-update shape before committing it.
+    candidate_payload = existing.model_dump()
+    candidate_payload.update(changes)
+    candidate = SliceConfig(**candidate_payload)
+
+    # Exclude the slice's own current reservation from the capacity check.
+    freed = existing.guaranteed_bitrate_mbps if existing.status == "active" else 0.0
+    in_use = slice_registry.get_total_active_bandwidth() - freed
+    if in_use + candidate.guaranteed_bitrate_mbps > settings.total_bandwidth_mbps:
         raise HTTPException(
-            status_code=404, detail=f"Slice with ID '{slice_id}' not found"
-        )
-    return slice_config
-
-
-@router.delete("/{slice_id}", response_model=dict)
-async def delete_slice(slice_id: str):
-    """
-    Delete a slice from the registry and SDN controller.
-
-    Args:
-        slice_id: UUID of the slice to delete
-
-    Returns:
-        Confirmation message
-
-    Raises:
-        404 if slice not found
-    """
-    slice_config = slice_registry.get_slice(slice_id)
-    if not slice_config:
-        raise HTTPException(
-            status_code=404, detail=f"Slice with ID '{slice_id}' not found"
+            status_code=409,
+            detail=(
+                f"Update rejected: {candidate.guaranteed_bitrate_mbps:.1f} Mbps would exceed "
+                f"the {settings.total_bandwidth_mbps:.0f} Mbps capacity "
+                f"({in_use:.1f} Mbps used by other slices)."
+            ),
         )
 
-    # Remove from SDN controller
+    updated = slice_registry.update_slice(slice_id, changes)
+    audit_log.record_slice_event(
+        "slice_updated", updated, f"'{updated.name}' updated", detail={"changes": changes}
+    )
+    await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
+    return updated
+
+
+@router.post("/{slice_id}/scale", response_model=SliceConfig)
+async def scale_slice(slice_id: str, request: SliceScaleRequest) -> SliceConfig:
+    """Scale a slice's guaranteed bandwidth by a factor or to an absolute value."""
+    existing = slice_registry.get_slice(slice_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
+
+    try:
+        target = request.resolve(existing.guaranteed_bitrate_mbps)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return await update_slice(
+        slice_id,
+        SliceUpdateRequest(
+            guaranteed_bitrate_mbps=target,
+            max_bitrate_mbps=max(target, existing.max_bitrate_mbps),
+        ),
+    )
+
+
+@router.post("/{slice_id}/suspend", response_model=SliceStatusChange)
+async def suspend_slice(slice_id: str) -> SliceStatusChange:
+    """Suspend a slice, releasing its guaranteed bandwidth back to the pool."""
+    existing = slice_registry.get_slice(slice_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
+    if existing.status != "active":
+        raise HTTPException(
+            status_code=409, detail=f"Only active slices can be suspended (status: {existing.status})"
+        )
+
+    updated = slice_registry.set_status(slice_id, "pending")
+    audit_log.record_slice_event(
+        "slice_suspended", updated, f"'{updated.name}' suspended", severity="warning"
+    )
+    await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
+    return SliceStatusChange(
+        slice_id=slice_id,
+        previous_status="active",
+        new_status="pending",
+        message=(
+            f"'{updated.name}' suspended; "
+            f"{updated.guaranteed_bitrate_mbps:.0f} Mbps returned to the pool."
+        ),
+    )
+
+
+@router.post("/{slice_id}/resume", response_model=SliceStatusChange)
+async def resume_slice(slice_id: str) -> SliceStatusChange:
+    """Reactivate a suspended slice, subject to current capacity."""
+    existing = slice_registry.get_slice(slice_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
+    if existing.status == "active":
+        raise HTTPException(status_code=409, detail="Slice is already active")
+
+    report = conflict_detector.detect_conflicts(existing)
+    if report.has_conflict:
+        raise HTTPException(
+            status_code=409, detail=f"Cannot resume: {report.details}"
+        )
+
+    previous = existing.status
+    updated = slice_registry.set_status(slice_id, "active")
+    audit_log.record_slice_event("slice_resumed", updated, f"'{updated.name}' resumed")
+    await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
+    return SliceStatusChange(
+        slice_id=slice_id,
+        previous_status=previous,
+        new_status="active",
+        message=f"'{updated.name}' is active again.",
+    )
+
+
+@router.delete("/{slice_id}")
+async def delete_slice(slice_id: str) -> dict:
+    """Tear a slice down on the controller and remove it from the registry."""
+    existing = slice_registry.get_slice(slice_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
+
     await sdn_controller.remove_slice(slice_id)
-
-    # Remove from registry
-    deleted_slice = slice_registry.delete_slice(slice_id)
-
-    # Broadcast deletion event
+    removed = slice_registry.delete_slice(slice_id)
+    audit_log.record_slice_event("slice_deleted", removed, f"'{removed.name}' deleted")
     await manager.broadcast_slice_deleted(slice_id)
 
     return {
-        "message": f"Slice '{deleted_slice.name}' successfully deleted",
+        "message": f"Slice '{removed.name}' deleted",
         "slice_id": slice_id,
+        "released_mbps": removed.guaranteed_bitrate_mbps,
     }

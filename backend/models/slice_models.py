@@ -178,6 +178,46 @@ class SliceDeploymentResult(BaseModel):
         ..., description="Time taken to deploy in seconds"
     )
     message: str = Field(..., description="Human-readable result message")
+    parser_used: str = Field(
+        default="unknown", description="Which intent parser produced the configuration"
+    )
+    parse_fallback_reason: str | None = Field(
+        default=None, description="Why the LLM parser was bypassed, when it was"
+    )
+    parse_trace: dict | None = Field(
+        default=None, description="How each field was derived, for the deterministic parser"
+    )
+    auto_remediated: bool = Field(
+        default=False, description="Whether the conflict engine's fixes were applied"
+    )
+
+
+class SliceSimulationRequest(BaseModel):
+    """A what-if admission check that never touches the network."""
+
+    intent: str = Field(..., description="Plain English slice requirement")
+    apply_remediation: bool = Field(
+        default=False, description="Re-check after applying the engine's proposed fixes"
+    )
+
+
+class SliceSimulationResult(BaseModel):
+    """Outcome of a dry-run admission check."""
+
+    would_deploy: bool = Field(..., description="Whether provisioning would succeed")
+    slice_config: SliceConfig = Field(..., description="The configuration that was evaluated")
+    conflict_report: ConflictReport = Field(..., description="Findings for the configuration")
+    remediated_config: SliceConfig | None = Field(
+        default=None, description="The configuration after applying proposed fixes"
+    )
+    remediated_report: ConflictReport | None = Field(
+        default=None, description="Findings after applying proposed fixes"
+    )
+    parser_used: str = Field(default="unknown")
+    capacity_before_mbps: float = Field(..., description="Guaranteed bandwidth in use now")
+    capacity_after_mbps: float = Field(
+        ..., description="Guaranteed bandwidth in use if this slice were admitted"
+    )
 
 
 class SliceStats(BaseModel):
@@ -199,7 +239,12 @@ class SliceStats(BaseModel):
 class WebSocketMessage(BaseModel):
     """WebSocket message format for real-time updates."""
 
-    event: Literal["slice_created", "slice_deleted", "conflict_detected"] = Field(
-        ..., description="Event type"
-    )
+    event: Literal[
+        "slice_created",
+        "slice_updated",
+        "slice_deleted",
+        "conflict_detected",
+        "telemetry",
+        "sla_alert",
+    ] = Field(..., description="Event type")
     data: dict = Field(..., description="Event payload")
