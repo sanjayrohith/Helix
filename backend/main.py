@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from core.logging_config import configure_logging, get_logger
-from routers import slices_router, system_router, websocket_router
+from routers import manager, slices_router, system_router, websocket_router
+from services.monitor_loop import monitor_loop
 
 configure_logging()
 logger = get_logger("app")
@@ -30,7 +31,10 @@ async def lifespan(app: FastAPI):
         "llm" if settings.llm_available else "rule-based",
         settings.total_bandwidth_mbps,
     )
+    monitor_loop.set_broadcaster(manager)
+    await monitor_loop.start()
     yield
+    await monitor_loop.stop()
     logger.info("%s shutting down", settings.app_name)
 
 

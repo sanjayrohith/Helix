@@ -58,6 +58,19 @@ class ConnectionManager:
         message = WebSocketMessage(event="conflict_detected", data=conflict_data)
         await self.broadcast(message)
 
+    async def broadcast_telemetry(self, payload: dict):
+        """Broadcast one telemetry interval to every connected dashboard."""
+        await self.broadcast(WebSocketMessage(event="telemetry", data=payload))
+
+    async def broadcast_sla_alert(self, payload: dict):
+        """Broadcast an SLA status change."""
+        await self.broadcast(WebSocketMessage(event="sla_alert", data=payload))
+
+    @property
+    def connection_count(self) -> int:
+        """How many dashboards are currently connected."""
+        return len(self.active_connections)
+
 
 # Global connection manager instance
 manager = ConnectionManager()

@@ -9,7 +9,9 @@ from fastapi import APIRouter
 
 from core.config import settings
 from services.intent_parser import intent_parser
+from services.monitor_loop import monitor_loop
 from services.sdn_controller import sdn_controller
+from storage.sqlite_store import get_store
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -26,6 +28,8 @@ async def system_info() -> dict:
             "platform": platform.system(),
             "uptime_seconds": round(time.time() - _STARTED_AT, 1),
         },
+        "storage": get_store().stats(),
+        "monitor": monitor_loop.status(),
     }
 
 
@@ -48,5 +52,6 @@ async def readiness() -> dict:
     checks = {
         "parser": True,  # the rule-based parser is always available
         "sdn_controller": bool(controller.get("connected")),
+        "telemetry": monitor_loop.running or not settings.telemetry_enabled,
     }
     return {"ready": all(checks.values()), "checks": checks}
