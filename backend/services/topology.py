@@ -124,6 +124,15 @@ LATENCY_HEADROOM_WEIGHT = 25.0
 CAPACITY_HEADROOM_WEIGHT = 20.0
 ISOLATION_FIT_BONUS = 15.0
 
+# Shared immutable default for a node with no placements at all - avoids
+# allocating a fresh empty dict per lookup for the (common) unoccupied node.
+_EMPTY_USAGE: dict = {
+    "allocated_mbps": 0.0,
+    "attached_devices": 0,
+    "hosted_slices": 0,
+    "slice_ids": [],
+}
+
 
 class TopologyManager:
     """Tracks node occupancy and decides where each slice runs."""
@@ -142,18 +151,23 @@ class TopologyManager:
 
     def evaluate(self, config: SliceConfig, exclude_slice: bool = True) -> list[PlacementCandidate]:
         """Score every node for hosting ``config``, best first."""
-        candidates: list[PlacementCandidate] = []
-        for node in self._nodes.values():
-            candidates.append(self._score_node(node, config, exclude_slice))
+        exclude = config.slice_id if exclude_slice else None
+        # Computed once for every node in this call, rather than each node
+        # independently re-scanning every placement to find its own share -
+        # O(nodes + placements) instead of O(nodes x placements).
+        usage_by_node = self._usage_by_node(exclude_slice_id=exclude)
+
+        candidates = [
+            self._score_node(node, config, usage_by_node.get(node.node_id, _EMPTY_USAGE))
+            for node in self._nodes.values()
+        ]
         candidates.sort(key=lambda c: (not c.feasible, -c.score))
         return candidates
 
     def _score_node(
-        self, node: NetworkNode, config: SliceConfig, exclude_slice: bool
+        self, node: NetworkNode, config: SliceConfig, usage: dict
     ) -> PlacementCandidate:
         """Judge one node's fit for a slice, recording the reasoning."""
-        exclude = config.slice_id if exclude_slice else None
-        usage = self._usage(node.node_id, exclude_slice_id=exclude)
         reasons: list[str] = []
         feasible = True
         score = 0.0
@@ -287,38 +301,61 @@ class TopologyManager:
 
     # --- occupancy ---------------------------------------------------------------
 
-    def _usage(self, node_id: str, exclude_slice_id: str | None = None) -> dict:
-        """Compute what a node is currently carrying."""
+    def _usage_by_node(self, exclude_slice_id: str | None = None) -> dict[str, dict]:
+        """Compute occupancy for every node in a single pass over placements.
+
+        Grouping placements by node first, then resolving each slice's
+        contribution once, replaces what used to be an independent full
+        scan of every placement per node (O(nodes x placements)) with one
+        pass over placements plus one registry lookup per placed slice
+        (O(nodes + placements)) - the difference that actually matters once
+        an instance has accumulated hundreds of slices across a handful of
+        nodes, rather than the three demo slices this started with.
+        """
         from services.slice_registry import slice_registry
 
-        allocated = 0.0
-        devices = 0
-        slice_ids: list[str] = []
+        grouped: dict[str, list[str]] = {}
         with self._lock:
-            hosted = [
-                slice_id
-                for slice_id, assigned in self._placements.items()
-                if assigned == node_id and slice_id != exclude_slice_id
-            ]
-        for slice_id in hosted:
-            config = slice_registry.get_slice(slice_id)
-            if config is None or config.status != "active":
-                continue
-            allocated += config.guaranteed_bitrate_mbps
-            devices += config.device_count
-            slice_ids.append(slice_id)
-        return {
-            "allocated_mbps": allocated,
-            "attached_devices": devices,
-            "hosted_slices": len(slice_ids),
-            "slice_ids": slice_ids,
-        }
+            for slice_id, node_id in self._placements.items():
+                if slice_id == exclude_slice_id:
+                    continue
+                grouped.setdefault(node_id, []).append(slice_id)
+
+        usage_by_node: dict[str, dict] = {}
+        for node_id, slice_ids in grouped.items():
+            allocated = 0.0
+            devices = 0
+            active_ids: list[str] = []
+            for slice_id in slice_ids:
+                config = slice_registry.get_slice(slice_id)
+                if config is None or config.status != "active":
+                    continue
+                allocated += config.guaranteed_bitrate_mbps
+                devices += config.device_count
+                active_ids.append(slice_id)
+            usage_by_node[node_id] = {
+                "allocated_mbps": allocated,
+                "attached_devices": devices,
+                "hosted_slices": len(active_ids),
+                "slice_ids": active_ids,
+            }
+        return usage_by_node
+
+    def _usage(self, node_id: str, exclude_slice_id: str | None = None) -> dict:
+        """Occupancy for a single node.
+
+        Kept for callers (tests, and anything scoring exactly one node) that
+        do not need every node's usage at once; prefer `_usage_by_node` when
+        iterating over several nodes in the same call.
+        """
+        return self._usage_by_node(exclude_slice_id=exclude_slice_id).get(node_id, _EMPTY_USAGE)
 
     def utilization(self) -> list[NodeUtilization]:
         """Live occupancy for every node."""
+        usage_by_node = self._usage_by_node()
         result: list[NodeUtilization] = []
         for node in self._nodes.values():
-            usage = self._usage(node.node_id)
+            usage = usage_by_node.get(node.node_id, _EMPTY_USAGE)
             result.append(
                 NodeUtilization(
                     node_id=node.node_id,

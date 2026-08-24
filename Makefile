@@ -67,6 +67,9 @@ restore-db: ## Restore the local database: make restore-db FROM=path/to/backup.d
 verify-db: ## Check the local database's integrity and schema version
 	$(PY) scripts/backup_db.py verify $(BACKEND)/data/helix.db
 
+load-test: ## Load-test a running API (default localhost:8000)
+	$(PY) scripts/load_test.py --base-url http://localhost:$(PORT)
+
 clean: ## Remove build artefacts and caches
 	rm -rf $(FRONT)/dist $(FRONT)/node_modules/.vite
 	find $(BACKEND) -type d -name __pycache__ -prune -exec rm -rf {} +
