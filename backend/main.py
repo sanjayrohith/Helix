@@ -13,7 +13,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from core.logging_config import configure_logging, get_logger
-from routers import manager, slices_router, system_router, websocket_router
+from routers import (
+    events_router,
+    manager,
+    slices_router,
+    system_router,
+    telemetry_router,
+    websocket_router,
+)
 from services.monitor_loop import monitor_loop
 
 configure_logging()
@@ -59,6 +66,8 @@ app.add_middleware(
 )
 
 app.include_router(slices_router)
+app.include_router(telemetry_router)
+app.include_router(events_router)
 app.include_router(system_router)
 app.include_router(websocket_router)
 
@@ -76,6 +85,11 @@ async def root() -> dict:
             "get_slice": "GET /api/slices/{slice_id}",
             "delete_slice": "DELETE /api/slices/{slice_id}",
             "get_stats": "GET /api/slices/stats/summary",
+            "simulate_slice": "POST /api/slices/simulate",
+            "telemetry_summary": "GET /api/telemetry/summary",
+            "slice_telemetry": "GET /api/telemetry/{slice_id}",
+            "sla_violations": "GET /api/telemetry/violations",
+            "audit_events": "GET /api/events",
             "system_info": "GET /api/system/info",
             "parser_status": "GET /api/system/parser",
             "websocket": "WS /ws",
