@@ -31,6 +31,9 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Type check
+        run: mypy
+
       - name: Test
         # The suite forces the deterministic parser and disables persistence,
         # so no API key or database is needed in CI.

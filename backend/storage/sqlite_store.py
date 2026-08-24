@@ -227,18 +227,22 @@ class SqliteStore:
 
     def stats(self) -> dict:
         """Report storage health for the system-info endpoint."""
-        if not self.enabled:
+        db = self._db
+        if db is None:
+            # Either never enabled, or closed (e.g. during shutdown/tests) -
+            # report as unavailable rather than crashing on a null connection.
             return {"enabled": False}
         size = self.path.stat().st_size if self.path.exists() else 0
         with self._lock:
-            events = int(self._conn.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"])
+            events = int(db.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"])
+            schema_version = current_version(db)
         return {
             "enabled": True,
             "path": str(self.path),
             "size_bytes": size,
             "slices": self.count_slices(),
             "events": events,
-            "schema_version": current_version(self._conn),
+            "schema_version": schema_version,
             "schema_latest": LATEST_VERSION,
         }
 

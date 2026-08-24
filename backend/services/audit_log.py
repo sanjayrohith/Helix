@@ -109,8 +109,13 @@ class AuditLog:
         limit: int = 100,
         offset: int = 0,
         slice_id: str | None = None,
-        event_type: EventType | None = None,
-        severity: EventSeverity | None = None,
+        # str rather than the EventType/EventSeverity Literal: this is the
+        # HTTP query-param boundary's filter, and an unrecognised value
+        # should behave as "matches nothing" (correct filter behaviour), not
+        # a type error - matching the same choice already made for
+        # SqliteStore.load_events, which this falls through to.
+        event_type: str | None = None,
+        severity: str | None = None,
     ) -> list[AuditEvent]:
         """Return matching events newest-first, `offset` rows into the result."""
         window = min(offset + limit, MAX_QUERY_WINDOW)
@@ -140,8 +145,8 @@ class AuditLog:
     def count(
         self,
         slice_id: str | None = None,
-        event_type: EventType | None = None,
-        severity: EventSeverity | None = None,
+        event_type: str | None = None,
+        severity: str | None = None,
     ) -> int:
         """Total matching events, for pagination headers.
 

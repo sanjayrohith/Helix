@@ -18,6 +18,7 @@ convention.
 
 from __future__ import annotations
 
+from collections.abc import Sized
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -46,8 +47,14 @@ class Page:
         return self.offset > 0
 
 
-def paginate(items: list, offset: int, limit: int) -> Page:
-    """Return pagination metadata for slicing ``items[offset:offset+limit]``."""
+def paginate(items: Sized, offset: int, limit: int) -> Page:
+    """Return pagination metadata for slicing ``items[offset:offset+limit]``.
+
+    Typed as Sized rather than list: this only ever calls len() on it, and
+    callers reasonably pass things that are not literally a list - a range
+    object, most notably, for GET /api/events, which paginates a count from
+    the audit journal rather than a materialised list of every event.
+    """
     return Page(offset=offset, limit=limit, total=len(items))
 
 

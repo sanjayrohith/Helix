@@ -177,7 +177,7 @@ def _score_profile(text: str, profile: UseCaseProfile) -> tuple[int, list[str]]:
 
 def select_profile(text: str) -> tuple[UseCaseProfile, int, list[str]]:
     """Pick the best matching use-case profile for a lowercased intent."""
-    best = (DEFAULT_PROFILE, 0, [])
+    best: tuple[UseCaseProfile, int, list[str]] = (DEFAULT_PROFILE, 0, [])
     for profile in USE_CASE_PROFILES:
         score, hits = _score_profile(text, profile)
         if score > best[1]:
