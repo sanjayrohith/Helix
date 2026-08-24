@@ -17,6 +17,7 @@ from core.middleware import install_middleware
 from routers import (
     events_router,
     manager,
+    metrics_router,
     slices_router,
     system_router,
     telemetry_router,
@@ -74,6 +75,7 @@ app.include_router(telemetry_router)
 app.include_router(events_router)
 app.include_router(topology_router)
 app.include_router(system_router)
+app.include_router(metrics_router)
 app.include_router(websocket_router)
 
 
@@ -96,6 +98,7 @@ async def root() -> dict:
             "sla_violations": "GET /api/telemetry/violations",
             "audit_events": "GET /api/events",
             "topology": "GET /api/topology",
+            "metrics": "GET /metrics",
             "slice_placement": "GET /api/topology/placement/{slice_id}",
             "system_info": "GET /api/system/info",
             "parser_status": "GET /api/system/parser",

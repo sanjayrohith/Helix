@@ -6,9 +6,11 @@ import platform
 import time
 
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 
 from core.config import settings
 from services.intent_parser import intent_parser
+from services.metrics import render_metrics
 from services.monitor_loop import monitor_loop
 from services.sdn_controller import sdn_controller
 from storage.sqlite_store import get_store
@@ -55,3 +57,16 @@ async def readiness() -> dict:
         "telemetry": monitor_loop.running or not settings.telemetry_enabled,
     }
     return {"ready": all(checks.values()), "checks": checks}
+
+
+metrics_router = APIRouter(tags=["system"])
+
+
+@metrics_router.get("/metrics", response_class=PlainTextResponse)
+async def prometheus_metrics() -> str:
+    """Prometheus exposition endpoint.
+
+    Mounted at the root rather than under /api so a default scrape config
+    finds it without extra path configuration.
+    """
+    return render_metrics()

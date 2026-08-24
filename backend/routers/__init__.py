@@ -2,6 +2,7 @@
 
 from .events import router as events_router
 from .slices import router as slices_router
+from .system import metrics_router
 from .system import router as system_router
 from .telemetry import router as telemetry_router
 from .topology import router as topology_router
@@ -14,6 +15,7 @@ __all__ = [
     "events_router",
     "topology_router",
     "system_router",
+    "metrics_router",
     "websocket_router",
     "manager",
 ]
