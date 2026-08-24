@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 
 from core.auth import Principal, ReadScope, WriteScope
 from core.config import settings
 from core.logging_config import get_logger
+from core.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, apply_pagination_headers, paginate
 from models.lifecycle_models import (
     SliceScaleRequest,
     SliceStatusChange,
@@ -216,12 +217,23 @@ async def simulate_slice(
 
 @router.get("", response_model=list[SliceConfig])
 async def get_all_slices(
+    request: Request,
+    response: Response,
     use_case: str | None = Query(default=None, description="Filter by use-case category"),
     location: str | None = Query(default=None, description="Filter by location"),
     status: str | None = Query(default=None, description="Filter by lifecycle status"),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
     principal: Principal = ReadScope,
 ) -> list[SliceConfig]:
-    """List provisioned slices, optionally filtered."""
+    """List provisioned slices, optionally filtered.
+
+    Paginated: the body stays a plain array so no existing caller breaks,
+    and pagination metadata rides in X-Total-Count and a Link header
+    (rel="next"/"prev"/"first"/"last"), the same convention GitHub's API
+    uses. A caller that ignores the headers just gets the first
+    `limit` (default 100, capped at 500) matches.
+    """
     slices = slice_registry.get_all_slices()
     if use_case:
         slices = [s for s in slices if s.use_case.lower() == use_case.lower()]
@@ -229,7 +241,10 @@ async def get_all_slices(
         slices = [s for s in slices if s.location.lower() == location.lower()]
     if status:
         slices = [s for s in slices if s.status == status]
-    return slices
+
+    page = paginate(slices, offset, limit)
+    apply_pagination_headers(response, request, page)
+    return slices[offset : offset + limit]
 
 
 @router.get("/stats/summary", response_model=SliceStats)
