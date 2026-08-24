@@ -1,10 +1,14 @@
 import type { SliceConfig } from '../types/slice';
 import { SST_NAMES } from '../types/slice';
+import type { SlaEvaluation } from '../types/telemetry';
+import { SlaBadge } from './SlaBadge';
 
 interface SliceCardProps {
   slice: SliceConfig;
   onDelete: (sliceId: string) => void;
   deleting: boolean;
+  onSelect?: (sliceId: string) => void;
+  sla?: SlaEvaluation;
 }
 
 // SST-based color mapping for top border and badge
@@ -33,7 +37,7 @@ const getSSTPalette = (sst: number) => {
   }
 };
 
-export function SliceCard({ slice, onDelete, deleting }: SliceCardProps) {
+export function SliceCard({ slice, onDelete, deleting, onSelect, sla }: SliceCardProps) {
   const isActive = slice.status === 'active';
   const isConflict = slice.status === 'conflict';
   const sstPalette = getSSTPalette(slice.sst);
@@ -61,7 +65,20 @@ export function SliceCard({ slice, onDelete, deleting }: SliceCardProps) {
   };
 
   return (
-    <div className={`reveal-up bg-white/[0.045] border border-white/10 border-t-2 ${sstPalette.border} rounded-2xl p-5 hover:border-cyan/40 transition-all duration-200 hover:-translate-y-0.5 panel-glow shadow-[0_16px_30px_rgba(5,10,25,0.35)]`}>
+    <div
+      className={`reveal-up bg-white/[0.045] border border-white/10 border-t-2 ${sstPalette.border} rounded-2xl p-5 hover:border-cyan/40 transition-all duration-200 hover:-translate-y-0.5 panel-glow shadow-[0_16px_30px_rgba(5,10,25,0.35)] ${
+        onSelect ? 'cursor-pointer' : ''
+      }`}
+      onClick={() => onSelect?.(slice.slice_id)}
+      role={onSelect ? 'button' : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onKeyDown={(event) => {
+        if (onSelect && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          onSelect(slice.slice_id);
+        }
+      }}
+    >
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
@@ -86,10 +103,15 @@ export function SliceCard({ slice, onDelete, deleting }: SliceCardProps) {
             >
               {slice.use_case}
             </span>
+            {sla && <SlaBadge status={sla.status} score={sla.compliance_score} compact />}
           </div>
         </div>
         <button
-          onClick={() => onDelete(slice.slice_id)}
+          onClick={(event) => {
+            // The card itself opens the drawer; deleting must not do both.
+            event.stopPropagation();
+            onDelete(slice.slice_id);
+          }}
           disabled={deleting}
           className="text-slate-400 hover:text-danger transition-colors p-1 disabled:opacity-50"
           title="Delete slice"
