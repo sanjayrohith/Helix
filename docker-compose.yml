@@ -4,19 +4,33 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
+      # Optional. Without a key HELIX uses its deterministic intent parser.
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - HELIX_LOG_JSON=${HELIX_LOG_JSON:-true}
+      - HELIX_TOTAL_BANDWIDTH_MBPS=${HELIX_TOTAL_BANDWIDTH_MBPS:-1000}
+      - HELIX_TELEMETRY_INTERVAL=${HELIX_TELEMETRY_INTERVAL:-2.0}
+      - HELIX_DATABASE_PATH=/data/helix.db
+    volumes:
+      # Keep provisioned slices across container restarts.
+      - helix-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
       start_period: 10s
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
     ports:
       - "5173:5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
-      - VITE_API_URL=http://localhost:8000
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    restart: unless-stopped
+
+volumes:
+  helix-data:
