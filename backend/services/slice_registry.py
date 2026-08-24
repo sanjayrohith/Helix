@@ -1,10 +1,9 @@
 """In-memory slice registry with pre-populated demo slices."""
 
 import uuid
-from datetime import datetime
 
 from core.config import settings
-from models.slice_models import SliceConfig, SliceStats
+from models.slice_models import SliceConfig, SliceStats, utcnow
 
 # Total network bandwidth capacity in Mbps (configurable via HELIX_TOTAL_BANDWIDTH_MBPS)
 TOTAL_BANDWIDTH_CAPACITY = settings.total_bandwidth_mbps
@@ -36,7 +35,7 @@ class SliceRegistry:
                 use_case="broadband",
                 location="Mumbai",
                 status="active",
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ),
             SliceConfig(
                 slice_id=str(uuid.uuid4()),
@@ -54,7 +53,7 @@ class SliceRegistry:
                 use_case="healthcare",
                 location="Chennai",
                 status="active",
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ),
             SliceConfig(
                 slice_id=str(uuid.uuid4()),
@@ -72,7 +71,7 @@ class SliceRegistry:
                 use_case="iot",
                 location="Bangalore",
                 status="active",
-                created_at=datetime.utcnow(),
+                created_at=utcnow(),
             ),
         ]
 

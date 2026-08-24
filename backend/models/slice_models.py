@@ -1,9 +1,19 @@
-"""Pydantic models for STRIX 5G Network Slicing system."""
+"""Pydantic models for the HELIX 5G network slicing system."""
 
-from datetime import datetime
+from __future__ import annotations
+
+import re
+from datetime import UTC, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+SD_PATTERN = re.compile(r"^0x[0-9a-fA-F]{6}$")
+
+
+def utcnow() -> datetime:
+    """Timezone-aware UTC timestamp (datetime.utcnow is deprecated in 3.12)."""
+    return datetime.now(UTC)
 
 
 class SliceIntent(BaseModel):
@@ -52,9 +62,45 @@ class SliceConfig(BaseModel):
     status: Literal["pending", "active", "conflict", "rejected"] = Field(
         default="pending", description="Current slice status"
     )
-    created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="Creation timestamp"
+    created_at: datetime = Field(default_factory=utcnow, description="Creation timestamp")
+    updated_at: datetime | None = Field(
+        default=None, description="Timestamp of the last configuration change"
     )
+
+    @field_validator("sd", mode="before")
+    @classmethod
+    def normalise_sd(cls, value: object) -> str:
+        """Accept '0x1', '000100' or 'ABC123' and normalise to '0xabc123'."""
+        if isinstance(value, int):
+            return f"0x{value:06x}"
+        text = str(value).strip().lower()
+        if text.startswith("0x"):
+            text = text[2:]
+        if not text or not all(char in "0123456789abcdef" for char in text):
+            raise ValueError(f"Slice Differentiator must be hexadecimal, got '{value}'")
+        if len(text) > 6:
+            raise ValueError(f"Slice Differentiator exceeds 24 bits: '{value}'")
+        return f"0x{text.zfill(6)}"
+
+    @field_validator("name")
+    @classmethod
+    def name_must_not_be_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Slice name must not be blank")
+        return cleaned[:120]
+
+    @model_validator(mode="after")
+    def bitrates_must_be_ordered(self) -> SliceConfig:
+        """MBR below GBR is not a representable QoS flow, so raise it instead."""
+        if self.max_bitrate_mbps < self.guaranteed_bitrate_mbps:
+            self.max_bitrate_mbps = self.guaranteed_bitrate_mbps
+        return self
+
+    @property
+    def snssai(self) -> str:
+        """The S-NSSAI in the conventional 'SST-SD' notation."""
+        return f"{self.sst:02x}-{self.sd[2:]}"
 
 
 class ConflictReport(BaseModel):
