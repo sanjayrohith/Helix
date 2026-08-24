@@ -51,8 +51,17 @@ class TestProvisioning:
         slice_id = provision(client, "broadband slice with 30 Mbps in Delhi")["slice_config"]["slice_id"]
         assert client.get(f"/api/slices/{slice_id}").status_code == 200
 
-    def test_an_empty_intent_is_rejected(self, client: TestClient) -> None:
-        assert client.post("/api/slices/provision", json={"intent": "   "}).status_code == 400
+    def test_a_blank_intent_is_rejected_at_the_schema_boundary(self, client: TestClient) -> None:
+        # Whitespace-only input fails Pydantic validation (422) rather than
+        # reaching the parser and failing there (400) - rejected earlier and
+        # consistently with every other validation error in the API.
+        assert client.post("/api/slices/provision", json={"intent": "   "}).status_code == 422
+
+    def test_an_oversized_intent_is_rejected(self, client: TestClient) -> None:
+        response = client.post(
+            "/api/slices/provision", json={"intent": "x" * 2001}
+        )
+        assert response.status_code == 422
 
     def test_an_oversized_request_reports_the_conflict(self, client: TestClient) -> None:
         result = provision(client, "broadband slice with 50 Gbps for the campus")
