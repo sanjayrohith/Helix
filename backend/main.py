@@ -13,6 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
 from core.logging_config import configure_logging, get_logger
+from core.middleware import install_middleware
 from routers import (
     events_router,
     manager,
@@ -57,6 +58,8 @@ app = FastAPI(
     redoc_url="/redoc",
     lifespan=lifespan,
 )
+
+install_middleware(app)
 
 app.add_middleware(
     CORSMiddleware,

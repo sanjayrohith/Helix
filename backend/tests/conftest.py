@@ -16,6 +16,7 @@ os.environ.setdefault("HELIX_TELEMETRY_ENABLED", "false")
 os.environ.setdefault("HELIX_LOG_LEVEL", "WARNING")
 # Deployments are simulated with real sleeps; scale them away so tests stay fast.
 os.environ.setdefault("HELIX_SDN_STEP_SCALE", "0")
+os.environ.setdefault("HELIX_RATE_LIMIT_PER_MINUTE", "0")
 
 import pytest  # noqa: E402
 

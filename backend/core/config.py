@@ -64,6 +64,8 @@ class Settings:
         self.host: str = os.getenv("HELIX_HOST", "0.0.0.0")
         self.port: int = _get_int("HELIX_PORT", 8000)
         self.cors_origins: list[str] = _get_list("HELIX_CORS_ORIGINS", ["*"])
+        # Write requests per client per minute; 0 disables the limiter.
+        self.rate_limit_per_minute: int = _get_int("HELIX_RATE_LIMIT_PER_MINUTE", 60)
 
         # --- Radio / transport capacity ------------------------------------
         self.total_bandwidth_mbps: float = _get_float("HELIX_TOTAL_BANDWIDTH_MBPS", 1000.0)
@@ -117,6 +119,7 @@ class Settings:
             "persistence_enabled": self.persistence_enabled,
             "telemetry_enabled": self.telemetry_enabled,
             "telemetry_interval_seconds": self.telemetry_interval_seconds,
+            "rate_limit_per_minute": self.rate_limit_per_minute,
         }
 
 
