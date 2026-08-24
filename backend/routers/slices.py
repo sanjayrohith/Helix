@@ -27,6 +27,7 @@ from services.conflict_detector import conflict_detector
 from services.intent_parser import intent_parser
 from services.sdn_controller import sdn_controller
 from services.slice_registry import slice_registry
+from services.topology import topology_manager
 
 logger = get_logger("api.slices")
 
@@ -106,11 +107,18 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
     if deployed:
         config.status = "active"
         slice_registry.add_slice(config)
+        placement = topology_manager.place(config)
+        if not placement.placed:
+            logger.warning("Slice '%s' deployed but unplaced: %s", config.name, placement.explanation)
         audit_log.record_slice_event(
             "slice_created",
             config,
             f"'{config.name}' activated ({config.guaranteed_bitrate_mbps:.0f} Mbps GBR)",
-            detail={"warnings": [f.conflict_type for f in report.warnings]},
+            detail={
+                "warnings": [f.conflict_type for f in report.warnings],
+                "node_id": placement.node_id,
+                "placement": placement.explanation,
+            },
         )
         await manager.broadcast_slice_created(config.model_dump(mode="json"))
     else:
@@ -330,6 +338,7 @@ async def delete_slice(slice_id: str) -> dict:
 
     await sdn_controller.remove_slice(slice_id)
     removed = slice_registry.delete_slice(slice_id)
+    topology_manager.unplace(slice_id)
     audit_log.record_slice_event("slice_deleted", removed, f"'{removed.name}' deleted")
     await manager.broadcast_slice_deleted(slice_id)
 

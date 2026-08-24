@@ -19,6 +19,7 @@ from routers import (
     slices_router,
     system_router,
     telemetry_router,
+    topology_router,
     websocket_router,
 )
 from services.monitor_loop import monitor_loop
@@ -68,6 +69,7 @@ app.add_middleware(
 app.include_router(slices_router)
 app.include_router(telemetry_router)
 app.include_router(events_router)
+app.include_router(topology_router)
 app.include_router(system_router)
 app.include_router(websocket_router)
 
@@ -90,6 +92,8 @@ async def root() -> dict:
             "slice_telemetry": "GET /api/telemetry/{slice_id}",
             "sla_violations": "GET /api/telemetry/violations",
             "audit_events": "GET /api/events",
+            "topology": "GET /api/topology",
+            "slice_placement": "GET /api/topology/placement/{slice_id}",
             "system_info": "GET /api/system/info",
             "parser_status": "GET /api/system/parser",
             "websocket": "WS /ws",
