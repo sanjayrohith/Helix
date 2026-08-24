@@ -103,17 +103,65 @@ class SliceConfig(BaseModel):
         return f"{self.sst:02x}-{self.sd[2:]}"
 
 
-class ConflictReport(BaseModel):
-    """Conflict detection report for slice provisioning."""
+ConflictType = Literal[
+    "bandwidth",
+    "snssai",
+    "arp",
+    "regulatory",
+    "latency",
+    "isolation",
+    "device_density",
+]
 
-    has_conflict: bool = Field(..., description="Whether a conflict was detected")
-    conflict_type: Literal["bandwidth", "snssai", "arp", "regulatory"] | None = (
-        Field(None, description="Type of conflict detected")
+ConflictSeverity = Literal["blocking", "warning", "advisory"]
+
+
+class ConflictFinding(BaseModel):
+    """One specific problem found while validating a proposed slice."""
+
+    conflict_type: ConflictType = Field(..., description="Category of the problem")
+    severity: ConflictSeverity = Field(
+        ..., description="blocking prevents deployment; warning and advisory do not"
     )
-    details: str = Field(..., description="Human-readable conflict description")
+    details: str = Field(..., description="Human-readable explanation")
     suggestions: list[str] = Field(
-        default_factory=list, description="Recommended actions to resolve conflict"
+        default_factory=list, description="Recommended actions to resolve it"
     )
+    remediation: dict = Field(
+        default_factory=dict,
+        description="Field changes that would resolve this finding automatically",
+    )
+    conflicting_slice_ids: list[str] = Field(
+        default_factory=list, description="Existing slices involved in the clash"
+    )
+
+
+class ConflictReport(BaseModel):
+    """Aggregate conflict detection result for a proposed slice."""
+
+    has_conflict: bool = Field(..., description="Whether a blocking conflict was detected")
+    conflict_type: ConflictType | None = Field(
+        None, description="Category of the most severe finding, for backwards compatibility"
+    )
+    details: str = Field(..., description="Human-readable summary of the findings")
+    suggestions: list[str] = Field(
+        default_factory=list, description="Recommended actions to resolve the conflicts"
+    )
+    findings: list[ConflictFinding] = Field(
+        default_factory=list, description="Every problem found, not just the first"
+    )
+    auto_remediation: dict = Field(
+        default_factory=dict,
+        description="A merged set of field changes that would make the slice admissible",
+    )
+
+    @property
+    def blocking_findings(self) -> list[ConflictFinding]:
+        return [f for f in self.findings if f.severity == "blocking"]
+
+    @property
+    def warnings(self) -> list[ConflictFinding]:
+        return [f for f in self.findings if f.severity != "blocking"]
 
 
 class SliceDeploymentResult(BaseModel):
