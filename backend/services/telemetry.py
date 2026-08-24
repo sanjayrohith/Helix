@@ -47,7 +47,7 @@ class SliceRuntimeState:
     total_ticks: int = 0
     available_ticks: int = 0
 
-    def advance(self, base_load: float) -> None:
+    def advance(self, base_load: float, outage_rate: float = 0.0) -> None:
         """Move the simulation forward one interval."""
         self.ticks += 1
         self.total_ticks += 1
@@ -68,7 +68,7 @@ class SliceRuntimeState:
         else:
             self.available_ticks += 1
             # Rare, short degradations keep the availability figure meaningful.
-            if random.random() < 0.004:
+            if outage_rate > 0 and random.random() < outage_rate:
                 self.outage_ticks_remaining = random.randint(1, 3)
 
     @property
@@ -105,7 +105,7 @@ class TelemetryEngine:
             )
 
         base_load = BASE_LOAD_BY_SST.get(config.sst, 0.6)
-        state.advance(base_load)
+        state.advance(base_load, outage_rate=settings.telemetry_outage_rate)
         telemetry = self._derive(config, state)
 
         with self._lock:

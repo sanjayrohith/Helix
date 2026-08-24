@@ -91,6 +91,9 @@ class Settings:
         self.telemetry_enabled: bool = _get_bool("HELIX_TELEMETRY_ENABLED", True)
         self.telemetry_interval_seconds: float = _get_float("HELIX_TELEMETRY_INTERVAL", 2.0)
         self.telemetry_history_size: int = _get_int("HELIX_TELEMETRY_HISTORY", 120)
+        # Per-interval probability that a slice enters a short degradation.
+        # Set to 0 for a deterministic simulator (used by the test suite).
+        self.telemetry_outage_rate: float = _get_float("HELIX_TELEMETRY_OUTAGE_RATE", 0.004)
 
         # --- SDN controller simulation ------------------------------------------
         # Scales every simulated deployment step; set to 0 for instant deploys.
