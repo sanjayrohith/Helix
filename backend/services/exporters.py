@@ -25,6 +25,25 @@ EXPORT_FORMATS = ("open5gs", "kubernetes", "snssai", "flow-rules", "json")
 # --- minimal YAML writer ------------------------------------------------------
 
 
+def _looks_numeric(text: str) -> bool:
+    """True when a parser would read this string back as a number.
+
+    This matters for fields like the Slice Differentiator: an SD of '000002'
+    emitted bare comes back as the integer 2, silently corrupting the export.
+    """
+    candidate = text.strip()
+    if not candidate:
+        return False
+    try:
+        float(candidate)
+        return True
+    except ValueError:
+        pass
+    # YAML 1.1 also reads a leading 0 as octal and 0x as hexadecimal.
+    stripped = candidate.lstrip("+-")
+    return stripped.startswith(("0x", "0o", "0b")) and len(stripped) > 2
+
+
 def _yaml_scalar(value: Any) -> str:
     if value is None:
         return "null"
@@ -33,10 +52,12 @@ def _yaml_scalar(value: Any) -> str:
     if isinstance(value, (int, float)):
         return str(value)
     text = str(value)
-    # Quote anything that could be misread as another YAML type.
-    if text == "" or text[0] in "&*?|-<>=!%@`{[\"'#" or ": " in text or text.strip() != text:
+    # Quote anything a parser could read back as a different type.
+    if text == "" or text[0] in "&*?|-<>=!%@`{[\"'#" or ":" in text or text.strip() != text:
         return json.dumps(text)
     if text.lower() in {"true", "false", "null", "yes", "no", "on", "off", "~"}:
+        return json.dumps(text)
+    if _looks_numeric(text):
         return json.dumps(text)
     return text
 
