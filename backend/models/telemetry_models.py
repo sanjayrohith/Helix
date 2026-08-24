@@ -18,7 +18,10 @@ class SliceTelemetry(BaseModel):
 
     slice_id: str = Field(..., description="Slice the sample belongs to")
     timestamp: datetime = Field(default_factory=utcnow, description="Sample time")
-    throughput_mbps: float = Field(..., ge=0, description="Observed aggregate throughput")
+    throughput_mbps: float = Field(..., ge=0, description="Delivered aggregate throughput")
+    offered_load_mbps: float = Field(
+        default=0.0, ge=0, description="Traffic the attached devices asked the slice to carry"
+    )
     latency_ms: float = Field(..., ge=0, description="Observed one-way latency")
     jitter_ms: float = Field(..., ge=0, description="Observed packet delay variation")
     packet_loss_percent: float = Field(..., ge=0, le=100, description="Observed packet loss")
@@ -29,6 +32,13 @@ class SliceTelemetry(BaseModel):
     availability_percent: float = Field(
         ..., ge=0, le=100, description="Rolling availability for the slice"
     )
+
+    @property
+    def delivery_ratio(self) -> float:
+        """Share of offered traffic the slice actually carried (1.0 when idle)."""
+        if self.offered_load_mbps <= 0:
+            return 1.0
+        return min(1.0, self.throughput_mbps / self.offered_load_mbps)
 
     @property
     def utilization_ratio(self) -> float:

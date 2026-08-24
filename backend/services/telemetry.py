@@ -118,12 +118,17 @@ class TelemetryEngine:
         quality = ISOLATION_QUALITY.get(config.isolation, 1.0)
         congestion = state.congestion
 
+        # Offered load is what the attached devices ask for; throughput is what the
+        # slice manages to carry. Separating them is what makes the SLA meaningful:
+        # a slice carrying little traffic is idle, not failing.
+        offered = config.guaranteed_bitrate_mbps * state.load_factor
         if state.in_outage:
-            throughput = config.guaranteed_bitrate_mbps * random.uniform(0.0, 0.15)
+            throughput = offered * random.uniform(0.0, 0.15)
         else:
-            offered = config.guaranteed_bitrate_mbps * state.load_factor
-            # Demand above the guaranteed rate can use headroom up to the max rate.
-            throughput = min(offered, config.max_bitrate_mbps)
+            # Demand above the guaranteed rate can use headroom up to the max rate,
+            # minus whatever congestion is currently costing the slice.
+            deliverable = min(offered, config.max_bitrate_mbps)
+            throughput = deliverable * (1.0 - congestion * 0.35)
 
         # Latency sits near the configured target and inflates under congestion.
         budget = packet_delay_budget(config.qos_5qi)
@@ -150,6 +155,7 @@ class TelemetryEngine:
         return SliceTelemetry(
             slice_id=config.slice_id,
             throughput_mbps=round(max(0.0, throughput), 2),
+            offered_load_mbps=round(max(0.0, offered), 2),
             latency_ms=round(max(0.1, latency), 2),
             jitter_ms=round(jitter, 2),
             packet_loss_percent=round(loss, 3),
@@ -192,6 +198,8 @@ class TelemetryEngine:
         count = len(samples)
         return {
             "throughput_mbps": round(sum(s.throughput_mbps for s in samples) / count, 2),
+            "offered_load_mbps": round(sum(s.offered_load_mbps for s in samples) / count, 2),
+            "delivery_ratio": round(sum(s.delivery_ratio for s in samples) / count, 4),
             "latency_ms": round(sum(s.latency_ms for s in samples) / count, 2),
             "jitter_ms": round(sum(s.jitter_ms for s in samples) / count, 2),
             "packet_loss_percent": round(
