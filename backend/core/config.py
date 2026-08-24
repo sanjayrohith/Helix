@@ -66,6 +66,11 @@ class Settings:
         self.cors_origins: list[str] = _get_list("HELIX_CORS_ORIGINS", ["*"])
         # Write requests per client per minute; 0 disables the limiter.
         self.rate_limit_per_minute: int = _get_int("HELIX_RATE_LIMIT_PER_MINUTE", 60)
+        # "key:scope[:label]" pairs, comma-separated. Empty means auth is off
+        # and every request is treated as a fully-privileged system caller -
+        # the same "secure if configured, open otherwise" pattern already
+        # used for the LLM parser, so a demo needs no setup.
+        self.api_keys_raw: str = os.getenv("HELIX_API_KEYS", "")
 
         # --- Radio / transport capacity ------------------------------------
         self.total_bandwidth_mbps: float = _get_float("HELIX_TOTAL_BANDWIDTH_MBPS", 1000.0)
@@ -123,6 +128,7 @@ class Settings:
             "telemetry_enabled": self.telemetry_enabled,
             "telemetry_interval_seconds": self.telemetry_interval_seconds,
             "rate_limit_per_minute": self.rate_limit_per_minute,
+            "auth_enabled": bool(self.api_keys_raw.strip()),
         }
 
 

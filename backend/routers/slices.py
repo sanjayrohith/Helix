@@ -6,6 +6,7 @@ import time
 
 from fastapi import APIRouter, HTTPException, Query
 
+from core.auth import Principal, ReadScope, WriteScope
 from core.config import settings
 from core.logging_config import get_logger
 from models.lifecycle_models import (
@@ -35,7 +36,9 @@ router = APIRouter(prefix="/api/slices", tags=["slices"])
 
 
 @router.post("/provision", response_model=SliceDeploymentResult)
-async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
+async def provision_slice(
+    intent: SliceIntent, principal: Principal = WriteScope
+) -> SliceDeploymentResult:
     """Provision a network slice from a natural-language intent.
 
     Parses the intent, runs admission control, and deploys to the SDN
@@ -55,6 +58,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
         "slice_provision_requested",
         config,
         f"Provisioning requested for '{config.name}'",
+        actor=principal.actor,
         detail={"parser": outcome.parser_used, "intent": intent.intent[:500]},
     )
 
@@ -67,6 +71,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
             config,
             f"'{config.name}' rejected: {report.conflict_type} conflict",
             severity="warning",
+            actor=principal.actor,
             detail={
                 "conflict_types": [f.conflict_type for f in report.blocking_findings],
                 "auto_remediation": report.auto_remediation,
@@ -114,6 +119,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
             "slice_created",
             config,
             f"'{config.name}' activated ({config.guaranteed_bitrate_mbps:.0f} Mbps GBR)",
+            actor=principal.actor,
             detail={
                 "warnings": [f.conflict_type for f in report.warnings],
                 "node_id": placement.node_id,
@@ -141,7 +147,9 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
 
 
 @router.post("/simulate", response_model=SliceSimulationResult)
-async def simulate_slice(request: SliceSimulationRequest) -> SliceSimulationResult:
+async def simulate_slice(
+    request: SliceSimulationRequest, principal: Principal = ReadScope
+) -> SliceSimulationResult:
     """Dry-run admission control without touching the network.
 
     Answers 'would this intent deploy, and if not what would it take?' so an
@@ -179,6 +187,7 @@ async def get_all_slices(
     use_case: str | None = Query(default=None, description="Filter by use-case category"),
     location: str | None = Query(default=None, description="Filter by location"),
     status: str | None = Query(default=None, description="Filter by lifecycle status"),
+    principal: Principal = ReadScope,
 ) -> list[SliceConfig]:
     """List provisioned slices, optionally filtered."""
     slices = slice_registry.get_all_slices()
@@ -192,13 +201,13 @@ async def get_all_slices(
 
 
 @router.get("/stats/summary", response_model=SliceStats)
-async def get_slice_stats() -> SliceStats:
+async def get_slice_stats(principal: Principal = ReadScope) -> SliceStats:
     """Summary counters for the dashboard header."""
     return slice_registry.get_stats()
 
 
 @router.get("/stats/breakdown")
-async def get_slice_breakdown() -> dict:
+async def get_slice_breakdown(principal: Principal = ReadScope) -> dict:
     """Group slices by SST, status, use case, location and isolation."""
     return {
         "capacity_mbps": settings.total_bandwidth_mbps,
@@ -209,7 +218,7 @@ async def get_slice_breakdown() -> dict:
 
 
 @router.get("/{slice_id}", response_model=SliceConfig)
-async def get_slice(slice_id: str) -> SliceConfig:
+async def get_slice(slice_id: str, principal: Principal = ReadScope) -> SliceConfig:
     """Retrieve a single slice by id."""
     config = slice_registry.get_slice(slice_id)
     if not config:
@@ -218,7 +227,11 @@ async def get_slice(slice_id: str) -> SliceConfig:
 
 
 @router.patch("/{slice_id}", response_model=SliceConfig)
-async def update_slice(slice_id: str, request: SliceUpdateRequest) -> SliceConfig:
+async def update_slice(
+    slice_id: str,
+    request: SliceUpdateRequest,
+    principal: Principal = WriteScope,
+) -> SliceConfig:
     """Apply a partial update to a live slice, re-running admission control."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -248,14 +261,22 @@ async def update_slice(slice_id: str, request: SliceUpdateRequest) -> SliceConfi
 
     updated = slice_registry.update_slice(slice_id, changes)
     audit_log.record_slice_event(
-        "slice_updated", updated, f"'{updated.name}' updated", detail={"changes": changes}
+        "slice_updated",
+        updated,
+        f"'{updated.name}' updated",
+        actor=principal.actor,
+        detail={"changes": changes},
     )
     await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
     return updated
 
 
 @router.post("/{slice_id}/scale", response_model=SliceConfig)
-async def scale_slice(slice_id: str, request: SliceScaleRequest) -> SliceConfig:
+async def scale_slice(
+    slice_id: str,
+    request: SliceScaleRequest,
+    principal: Principal = WriteScope,
+) -> SliceConfig:
     """Scale a slice's guaranteed bandwidth by a factor or to an absolute value."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -272,11 +293,14 @@ async def scale_slice(slice_id: str, request: SliceScaleRequest) -> SliceConfig:
             guaranteed_bitrate_mbps=target,
             max_bitrate_mbps=max(target, existing.max_bitrate_mbps),
         ),
+        principal=principal,
     )
 
 
 @router.post("/{slice_id}/suspend", response_model=SliceStatusChange)
-async def suspend_slice(slice_id: str) -> SliceStatusChange:
+async def suspend_slice(
+    slice_id: str, principal: Principal = WriteScope
+) -> SliceStatusChange:
     """Suspend a slice, releasing its guaranteed bandwidth back to the pool."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -288,7 +312,11 @@ async def suspend_slice(slice_id: str) -> SliceStatusChange:
 
     updated = slice_registry.set_status(slice_id, "pending")
     audit_log.record_slice_event(
-        "slice_suspended", updated, f"'{updated.name}' suspended", severity="warning"
+        "slice_suspended",
+        updated,
+        f"'{updated.name}' suspended",
+        severity="warning",
+        actor=principal.actor,
     )
     await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
     return SliceStatusChange(
@@ -303,7 +331,9 @@ async def suspend_slice(slice_id: str) -> SliceStatusChange:
 
 
 @router.post("/{slice_id}/resume", response_model=SliceStatusChange)
-async def resume_slice(slice_id: str) -> SliceStatusChange:
+async def resume_slice(
+    slice_id: str, principal: Principal = WriteScope
+) -> SliceStatusChange:
     """Reactivate a suspended slice, subject to current capacity."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -319,7 +349,9 @@ async def resume_slice(slice_id: str) -> SliceStatusChange:
 
     previous = existing.status
     updated = slice_registry.set_status(slice_id, "active")
-    audit_log.record_slice_event("slice_resumed", updated, f"'{updated.name}' resumed")
+    audit_log.record_slice_event(
+        "slice_resumed", updated, f"'{updated.name}' resumed", actor=principal.actor
+    )
     await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
     return SliceStatusChange(
         slice_id=slice_id,
@@ -330,7 +362,7 @@ async def resume_slice(slice_id: str) -> SliceStatusChange:
 
 
 @router.delete("/{slice_id}")
-async def delete_slice(slice_id: str) -> dict:
+async def delete_slice(slice_id: str, principal: Principal = WriteScope) -> dict:
     """Tear a slice down on the controller and remove it from the registry."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -339,7 +371,9 @@ async def delete_slice(slice_id: str) -> dict:
     await sdn_controller.remove_slice(slice_id)
     removed = slice_registry.delete_slice(slice_id)
     topology_manager.unplace(slice_id)
-    audit_log.record_slice_event("slice_deleted", removed, f"'{removed.name}' deleted")
+    audit_log.record_slice_event(
+        "slice_deleted", removed, f"'{removed.name}' deleted", actor=principal.actor
+    )
     await manager.broadcast_slice_deleted(slice_id)
 
     return {

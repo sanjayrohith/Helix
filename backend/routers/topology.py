@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from core.auth import Principal, ReadScope, WriteScope
 from models.topology_models import (
     NodeUtilization,
     PlacementCandidate,
@@ -17,7 +18,7 @@ router = APIRouter(prefix="/api/topology", tags=["topology"])
 
 
 @router.get("", response_model=TopologyView)
-async def get_topology() -> TopologyView:
+async def get_topology(principal: Principal = ReadScope) -> TopologyView:
     """The full twin: nodes with live occupancy, links and slice placements."""
     topology_manager.sync(slice_registry.get_active_slices())
     return topology_manager.view()
@@ -27,6 +28,7 @@ async def get_topology() -> TopologyView:
 async def list_nodes(
     node_type: str | None = Query(default=None, description="Filter by gnb, edge, upf or core"),
     location: str | None = Query(default=None, description="Filter by site"),
+    principal: Principal = ReadScope,
 ) -> list[NodeUtilization]:
     """Live occupancy for every node, optionally filtered."""
     nodes = topology_manager.utilization()
@@ -38,7 +40,7 @@ async def list_nodes(
 
 
 @router.get("/nodes/{node_id}", response_model=NodeUtilization)
-async def get_node(node_id: str) -> NodeUtilization:
+async def get_node(node_id: str, principal: Principal = ReadScope) -> NodeUtilization:
     """Live occupancy for one node."""
     for node in topology_manager.utilization():
         if node.node_id == node_id:
@@ -50,6 +52,7 @@ async def get_node(node_id: str) -> NodeUtilization:
 async def set_node_health(
     node_id: str,
     health: str = Query(..., description="healthy, degraded or offline"),
+    principal: Principal = WriteScope,
 ) -> dict:
     """Mark a node healthy, degraded or offline to exercise placement failover."""
     if health not in ("healthy", "degraded", "offline"):
@@ -63,7 +66,7 @@ async def set_node_health(
 
 
 @router.get("/placement/{slice_id}", response_model=PlacementDecision)
-async def get_placement(slice_id: str) -> PlacementDecision:
+async def get_placement(slice_id: str, principal: Principal = ReadScope) -> PlacementDecision:
     """Where a slice is placed, and how every node scored for it."""
     config = slice_registry.get_slice(slice_id)
     if not config:
@@ -93,7 +96,9 @@ async def get_placement(slice_id: str) -> PlacementDecision:
 
 
 @router.post("/placement/{slice_id}/rebalance", response_model=PlacementDecision)
-async def rebalance_slice(slice_id: str) -> PlacementDecision:
+async def rebalance_slice(
+    slice_id: str, principal: Principal = WriteScope
+) -> PlacementDecision:
     """Re-run placement for a slice, moving it if a better node is now available."""
     config = slice_registry.get_slice(slice_id)
     if not config:
@@ -103,7 +108,9 @@ async def rebalance_slice(slice_id: str) -> PlacementDecision:
 
 
 @router.get("/candidates/{slice_id}", response_model=list[PlacementCandidate])
-async def placement_candidates(slice_id: str) -> list[PlacementCandidate]:
+async def placement_candidates(
+    slice_id: str, principal: Principal = ReadScope
+) -> list[PlacementCandidate]:
     """Score every node for a slice without changing its placement."""
     config = slice_registry.get_slice(slice_id)
     if not config:

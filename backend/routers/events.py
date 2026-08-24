@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query
 
+from core.auth import Principal, ReadScope
 from models.event_models import AuditEvent
 from services.audit_log import audit_log
 
@@ -16,6 +17,7 @@ async def list_events(
     slice_id: str | None = Query(default=None, description="Only events for this slice"),
     event_type: str | None = Query(default=None, description="Only this kind of event"),
     severity: str | None = Query(default=None, description="info, warning or error"),
+    principal: Principal = ReadScope,
 ) -> list[AuditEvent]:
     """Read the audit journal, newest first."""
     return audit_log.query(
@@ -24,6 +26,6 @@ async def list_events(
 
 
 @router.get("/summary")
-async def event_summary() -> dict:
+async def event_summary(principal: Principal = ReadScope) -> dict:
     """Counts by event type and severity, for the activity panel."""
     return audit_log.summary()

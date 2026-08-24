@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
 
+from core.auth import Principal, ReadScope
 from services.exporters import EXPORT_FORMATS, export_all, export_slice
 from services.slice_registry import slice_registry
 
@@ -20,7 +21,7 @@ _EXTENSIONS = {
 
 
 @router.get("/formats")
-async def list_formats() -> dict:
+async def list_formats(principal: Principal = ReadScope) -> dict:
     """The export formats this instance supports."""
     return {
         "formats": [
@@ -63,6 +64,7 @@ async def export_every_slice(
     fmt: str = Query(default="kubernetes", alias="format", description="Export format"),
     status: str | None = Query(default=None, description="Only slices with this status"),
     download: bool = Query(default=False, description="Send as a file attachment"),
+    principal: Principal = ReadScope,
 ) -> Response:
     """Export every slice as one multi-document artefact."""
     _validate(fmt)
@@ -81,6 +83,7 @@ async def export_one_slice(
     slice_id: str,
     fmt: str = Query(default="kubernetes", alias="format", description="Export format"),
     download: bool = Query(default=False, description="Send as a file attachment"),
+    principal: Principal = ReadScope,
 ) -> Response:
     """Export one slice in the requested format."""
     _validate(fmt)
