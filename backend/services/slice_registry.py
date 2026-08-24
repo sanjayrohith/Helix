@@ -1,14 +1,14 @@
 """In-memory slice registry with pre-populated demo slices."""
 
+import uuid
 from datetime import datetime
 from typing import Optional
-import uuid
 
+from core.config import settings
 from models.slice_models import SliceConfig, SliceStats
 
-
-# Total network bandwidth capacity in Mbps
-TOTAL_BANDWIDTH_CAPACITY = 1000.0
+# Total network bandwidth capacity in Mbps (configurable via HELIX_TOTAL_BANDWIDTH_MBPS)
+TOTAL_BANDWIDTH_CAPACITY = settings.total_bandwidth_mbps
 
 
 class SliceRegistry:
