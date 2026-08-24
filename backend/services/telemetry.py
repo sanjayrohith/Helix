@@ -210,7 +210,18 @@ class TelemetryEngine:
             ),
             "availability_percent": samples[-1].availability_percent,
             "samples": count,
+            "availability_samples": self.observed_intervals(slice_id),
         }
+
+    def observed_intervals(self, slice_id: str) -> int:
+        """Total intervals this slice has been observed for, across all history.
+
+        Availability is a long-run figure: it is reported from the first
+        interval but only becomes statistically meaningful after many of them.
+        """
+        with self._lock:
+            state = self._state.get(slice_id)
+        return state.total_ticks if state else 0
 
     def network_summary(self, sla_counts: dict[str, int] | None = None) -> NetworkKpiSummary:
         """Roll the per-slice KPIs up into the dashboard header figures."""

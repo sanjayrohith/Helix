@@ -31,6 +31,11 @@ PACKET_LOSS_TARGETS = {1: 1.0, 2: 0.1, 3: 2.0}
 # Number of samples the verdict is averaged over.
 EVALUATION_WINDOW = 10
 
+# Availability is a long-run figure. Grading it from a handful of intervals
+# cannot distinguish 99.9% from 95%, so it is not evaluated until the slice has
+# been observed for at least this many intervals.
+MIN_AVAILABILITY_SAMPLES = 60
+
 # Weight each KPI contributes to the 0-100 compliance score.
 KPI_WEIGHTS = {
     "latency": 30.0,
@@ -151,7 +156,11 @@ class SlaMonitor:
             )
 
         availability = averages["availability_percent"]
-        if availability < target.min_availability_percent:
+        observed_intervals = averages.get("availability_samples", 0)
+        if (
+            observed_intervals >= MIN_AVAILABILITY_SAMPLES
+            and availability < target.min_availability_percent
+        ):
             shortfall = _shortfall(availability, target.min_availability_percent)
             penalty += KPI_WEIGHTS["availability"] * min(1.0, shortfall * 20)
             breaches.append(
