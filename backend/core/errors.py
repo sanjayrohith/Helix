@@ -97,6 +97,7 @@ def _code_for_status(status_code: int) -> str:
         403: "forbidden",
         404: "not_found",
         409: "conflict",
+        412: "precondition_failed",
         413: "payload_too_large",
         422: "validation_error",
         429: "rate_limited",

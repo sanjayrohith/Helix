@@ -8,6 +8,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 
 from core.auth import Principal, ReadScope, WriteScope
 from core.config import settings
+from core.etag import compute_etag, matches
 from core.logging_config import get_logger
 from core.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, apply_pagination_headers, paginate
 from models.lifecycle_models import (
@@ -265,26 +266,55 @@ async def get_slice_breakdown(principal: Principal = ReadScope) -> dict:
 
 
 @router.get("/{slice_id}", response_model=SliceConfig)
-async def get_slice(slice_id: str, principal: Principal = ReadScope) -> SliceConfig:
-    """Retrieve a single slice by id."""
+async def get_slice(
+    slice_id: str, response: Response, principal: Principal = ReadScope
+) -> SliceConfig:
+    """Retrieve a single slice by id.
+
+    Sets an ETag identifying this exact state, for use as an If-Match
+    precondition on a later PATCH.
+    """
     config = slice_registry.get_slice(slice_id)
     if not config:
         raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
+    response.headers["ETag"] = compute_etag(config)
     return config
 
 
-@router.patch("/{slice_id}", response_model=SliceConfig)
-async def update_slice(
+async def _apply_update(
     slice_id: str,
-    request: SliceUpdateRequest,
-    principal: Principal = WriteScope,
+    changes: dict,
+    *,
+    actor: str,
+    if_match: str | None,
 ) -> SliceConfig:
-    """Apply a partial update to a live slice, re-running admission control."""
+    """Shared update logic for both PATCH and /scale.
+
+    A plain function with no FastAPI-special defaults (Depends, Header, ...),
+    deliberately: an earlier version of this code had /scale call the PATCH
+    route handler directly as a Python coroutine, and each parameter FastAPI
+    resolves only through actual routing (Response injection, the Header()
+    sentinel for If-Match) broke that direct call the moment it was added -
+    twice, in the same afternoon. Extracting the real logic here removes the
+    footgun instead of threading yet another special case around it.
+    """
     existing = slice_registry.get_slice(slice_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
 
-    changes = request.changes()
+    if if_match is not None and not matches(compute_etag(existing), if_match):
+        # 412, not 409: this is specifically a failed HTTP conditional-request
+        # precondition (RFC 7232 S4.2), which is what tells an HTTP client
+        # library to treat it as "re-fetch and retry" rather than a generic
+        # business-rule conflict like the 409s used elsewhere in this file.
+        raise HTTPException(
+            status_code=412,
+            detail=(
+                "The slice has changed since it was last read (ETag mismatch). "
+                "Re-fetch it and retry the update."
+            ),
+        )
+
     if not changes:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -311,10 +341,40 @@ async def update_slice(
         "slice_updated",
         updated,
         f"'{updated.name}' updated",
-        actor=principal.actor,
+        actor=actor,
         detail={"changes": changes},
     )
     await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
+    return updated
+
+
+@router.patch("/{slice_id}", response_model=SliceConfig)
+async def update_slice(
+    slice_id: str,
+    request: SliceUpdateRequest,
+    response: Response,
+    principal: Principal = WriteScope,
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Optional. The ETag from a prior GET; rejected with 412 if the "
+            "slice has changed since, preventing a lost update."
+        ),
+    ),
+) -> SliceConfig:
+    """Apply a partial update to a live slice, re-running admission control.
+
+    Supplying If-Match (the ETag from a previous GET of this slice) turns a
+    silent lost update - two operators both reading the same slice and both
+    PATCHing from what they saw - into an explicit 412, so the second
+    writer is told to re-read and retry instead of unknowingly overwriting
+    the first writer's change.
+    """
+    updated = await _apply_update(
+        slice_id, request.changes(), actor=principal.actor, if_match=if_match
+    )
+    response.headers["ETag"] = compute_etag(updated)
     return updated
 
 
@@ -322,6 +382,7 @@ async def update_slice(
 async def scale_slice(
     slice_id: str,
     request: SliceScaleRequest,
+    response: Response,
     principal: Principal = WriteScope,
 ) -> SliceConfig:
     """Scale a slice's guaranteed bandwidth by a factor or to an absolute value."""
@@ -334,14 +395,17 @@ async def scale_slice(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return await update_slice(
+    updated = await _apply_update(
         slice_id,
-        SliceUpdateRequest(
-            guaranteed_bitrate_mbps=target,
-            max_bitrate_mbps=max(target, existing.max_bitrate_mbps),
-        ),
-        principal=principal,
+        {
+            "guaranteed_bitrate_mbps": target,
+            "max_bitrate_mbps": max(target, existing.max_bitrate_mbps),
+        },
+        actor=principal.actor,
+        if_match=None,
     )
+    response.headers["ETag"] = compute_etag(updated)
+    return updated
 
 
 @router.post("/{slice_id}/suspend", response_model=SliceStatusChange)
