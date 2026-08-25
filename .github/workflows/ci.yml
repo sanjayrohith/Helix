@@ -31,13 +31,16 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      - name: Type check
+        run: mypy
+
       - name: Test
         # The suite forces the deterministic parser and disables persistence,
         # so no API key or database is needed in CI.
         run: pytest -q
 
   frontend:
-    name: Frontend (typecheck + build)
+    name: Frontend (test + typecheck + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -53,6 +56,12 @@ jobs:
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Test
+        run: npm test
+
+      - name: Lint
+        run: npm run lint
 
       - name: Typecheck
         run: npx tsc --noEmit

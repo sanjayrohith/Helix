@@ -4,6 +4,66 @@ All notable changes to HELIX are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [2.1.0]
+
+A hardening pass over the 2.0.0 expansion: the same functionality, made safe
+to point at more than a laptop demo. No breaking changes — every addition is
+opt-in and the pre-2.1 behavior is the default until explicitly configured.
+
+### Added
+
+**Security**
+- API-key authentication with `read`/`write` scopes (`HELIX_API_KEYS`),
+  opt-in and off by default; see [`docs/SECURITY.md`](docs/SECURITY.md)
+- Standard security response headers (`X-Content-Type-Options`,
+  `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`, HSTS)
+- Request body size limit (`HELIX_MAX_BODY_BYTES`, default 1 MiB)
+- Schema-level validation: blank/oversized intents rejected at `422` before
+  reaching the parser
+
+**API robustness**
+- Idempotency keys (`Idempotency-Key` header) on `POST /api/slices/provision`
+- Optimistic concurrency: `ETag` on slice reads, `If-Match` on `PATCH`,
+  `412 Precondition Failed` on a stale write
+- Offset/limit pagination with RFC 5988 `Link` headers on `GET /api/slices`
+  and `GET /api/events`
+- Global exception handling: every error returns the same
+  `{detail, code, request_id}` envelope, including previously-uncaught ones
+- Fixed a real concurrent-delete race in `DELETE /api/slices/{id}` (found via
+  mypy's Optional narrowing, confirmed reachable, not just a type-checker
+  nitpick)
+
+**Data integrity**
+- A real forward-only migration runner (`storage/migrations.py`), tracked via
+  `PRAGMA user_version`, replacing the original `CREATE TABLE IF NOT EXISTS`
+  startup script
+- `scripts/backup_db.py`: online-API backup, integrity-checked restore that
+  refuses to overwrite a live database without confirmation
+
+**Frontend**
+- A Vitest + React Testing Library suite (62 tests) covering hooks,
+  components and the API client
+- A class-based `ErrorBoundary` wrapping every dashboard panel, so one
+  panel's crash doesn't take down the rest of the UI
+- A real focus trap on the slice detail drawer (`useFocusTrap`), with
+  Tab-cycling and focus restore on close
+
+**Code quality**
+- mypy wired into CI against the full backend source tree; fixed every
+  finding, including the delete race above and a stats()-after-close()
+  crash in the SQLite store
+- ESLint (flat config, typescript-eslint + react-hooks) and Prettier for the
+  frontend; ESLint is a CI gate, Prettier is available tooling
+- pre-commit hooks (whitespace, merge conflicts, ruff) and a pinned backend
+  dependency lockfile for reproducing CI's exact environment
+
+**Performance**
+- `scripts/load_test.py`, a dependency-free concurrent load tester, plus an
+  honest documented baseline (`docs/PERFORMANCE.md`)
+- `TopologyManager` occupancy computed in one pass instead of once per node;
+  measured, not assumed — the doc reports where the win is real (1.2-1.4x at
+  realistic node counts) and where it isn't (small demo-scale topologies)
+
 ## [2.0.0]
 
 A substantial expansion: HELIX goes from a provisioning form to a control

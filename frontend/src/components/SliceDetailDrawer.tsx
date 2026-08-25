@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { useFocusTrap } from '../hooks/useFocusTrap';
 import {
   fetchExport,
   getPlacement,
@@ -46,6 +47,7 @@ export function SliceDetailDrawer({
   const [busy, setBusy] = useState(false);
 
   const sliceId = slice?.slice_id ?? null;
+  const drawerRef = useFocusTrap(slice !== null);
 
   const loadTelemetry = useCallback(async () => {
     if (!sliceId) return;
@@ -117,9 +119,12 @@ export function SliceDetailDrawer({
         aria-hidden
       />
       <aside
-        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#0b1225] shadow-2xl"
+        ref={drawerRef as React.RefObject<HTMLElement>}
+        className="fixed right-0 top-0 z-50 flex h-full w-full max-w-xl flex-col border-l border-white/10 bg-[#0b1225] shadow-2xl outline-none"
         role="dialog"
+        aria-modal="true"
         aria-label={`Details for ${slice.name}`}
+        tabIndex={-1}
       >
         <header className="border-b border-white/10 px-5 py-4">
           <div className="flex items-start justify-between gap-3">

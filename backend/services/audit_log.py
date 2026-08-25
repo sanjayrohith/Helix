@@ -21,6 +21,14 @@ logger = get_logger("audit")
 
 IN_MEMORY_CAPACITY = 500
 
+# Offset-based paging fetches offset+limit rows and slices in Python rather
+# than pushing OFFSET down to SQLite, since the in-memory tail and the disk
+# fallback would otherwise need two different pagination implementations.
+# Capped here to match the journal's own default retention (prune_events
+# keeps 5000 by default), so a caller cannot page arbitrarily deep into
+# history that may not even be retained.
+MAX_QUERY_WINDOW = 5000
+
 
 class AuditLog:
     """Append-only event journal with a bounded in-memory tail."""
@@ -99,11 +107,19 @@ class AuditLog:
     def query(
         self,
         limit: int = 100,
+        offset: int = 0,
         slice_id: str | None = None,
-        event_type: EventType | None = None,
-        severity: EventSeverity | None = None,
+        # str rather than the EventType/EventSeverity Literal: this is the
+        # HTTP query-param boundary's filter, and an unrecognised value
+        # should behave as "matches nothing" (correct filter behaviour), not
+        # a type error - matching the same choice already made for
+        # SqliteStore.load_events, which this falls through to.
+        event_type: str | None = None,
+        severity: str | None = None,
     ) -> list[AuditEvent]:
-        """Return matching events newest-first."""
+        """Return matching events newest-first, `offset` rows into the result."""
+        window = min(offset + limit, MAX_QUERY_WINDOW)
+
         self._ensure_loaded()
         with self._lock:
             events = list(self._events)
@@ -116,12 +132,31 @@ class AuditLog:
             events = [e for e in events if e.severity == severity]
 
         events.reverse()  # newest first
-        if len(events) < limit and get_store().enabled:
+        if len(events) < window and get_store().enabled:
             # The in-memory tail may not reach far enough back; fall through to disk.
-            return get_store().load_events(
-                limit=limit, slice_id=slice_id, event_type=event_type, severity=severity
+            events = get_store().load_events(
+                limit=window, slice_id=slice_id, event_type=event_type, severity=severity
             ) or events
-        return events[:limit]
+        else:
+            events = events[:window]
+
+        return events[offset : offset + limit]
+
+    def count(
+        self,
+        slice_id: str | None = None,
+        event_type: str | None = None,
+        severity: str | None = None,
+    ) -> int:
+        """Total matching events, for pagination headers.
+
+        Bounded by MAX_QUERY_WINDOW for the same reason `query` is: this is
+        a count of what is realistically retained and pageable, not a
+        promise that every event ever recorded is reachable.
+        """
+        return len(
+            self.query(limit=MAX_QUERY_WINDOW, slice_id=slice_id, event_type=event_type, severity=severity)
+        )
 
     def summary(self) -> dict:
         """Counts by severity and type, for the dashboard's activity panel."""

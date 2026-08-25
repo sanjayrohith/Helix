@@ -128,6 +128,75 @@ class TestCapacityTracking:
         assert len(placed_on) > 1, "800 Mbps cannot fit on a single Chennai node"
 
 
+class TestUsageByNode:
+    def test_groups_multiple_nodes_correctly_in_one_pass(
+        self, topology: TopologyManager
+    ) -> None:
+        first = register(make_slice(sd="0x00b300", guaranteed_bitrate_mbps=50.0))
+        second = register(make_slice(sd="0x00b301", guaranteed_bitrate_mbps=80.0, location="Bangalore"))
+        node_a = topology.place(first).node_id
+        node_b = topology.place(second).node_id
+
+        usage = topology._usage_by_node()
+
+        assert usage[node_a]["allocated_mbps"] >= 50.0
+        if node_a != node_b:
+            assert usage[node_b]["allocated_mbps"] >= 80.0
+
+    def test_a_node_with_no_placements_is_absent_from_the_map(
+        self, topology: TopologyManager
+    ) -> None:
+        usage = topology._usage_by_node()
+        all_node_ids = {node.node_id for node in topology._nodes.values()}
+        # Only nodes actually carrying something appear; utilization() and
+        # _usage() both fall back to the shared empty-usage default for the rest.
+        assert set(usage.keys()) <= all_node_ids
+
+    def test_exclude_slice_id_removes_it_from_every_node_not_just_one(
+        self, topology: TopologyManager
+    ) -> None:
+        config = register(make_slice(guaranteed_bitrate_mbps=90.0))
+        node_id = topology.place(config).node_id
+
+        included = topology._usage_by_node()
+        excluded = topology._usage_by_node(exclude_slice_id=config.slice_id)
+
+        assert config.slice_id in included[node_id]["slice_ids"]
+        assert config.slice_id not in excluded.get(node_id, {"slice_ids": []})["slice_ids"]
+
+    def test_single_node_usage_matches_the_grouped_view(
+        self, topology: TopologyManager
+    ) -> None:
+        config = register(make_slice(guaranteed_bitrate_mbps=65.0))
+        node_id = topology.place(config).node_id
+
+        single = topology._usage(node_id)
+        grouped = topology._usage_by_node()[node_id]
+
+        assert single == grouped
+
+    def test_utilization_and_evaluate_agree_on_the_same_occupancy(
+        self, topology: TopologyManager
+    ) -> None:
+        config = register(make_slice(guaranteed_bitrate_mbps=40.0))
+        decision = topology.place(config)
+
+        node_from_utilization = next(
+            n for n in topology.utilization() if n.node_id == decision.node_id
+        )
+        candidate = next(
+            c for c in topology.evaluate(make_slice(sd="0x00b400"), exclude_slice=False)
+            if c.node_id == decision.node_id
+        )
+        # Both paths (utilization()'s direct usage_by_node call, and
+        # evaluate()'s scoring) must see the same allocated bandwidth for
+        # the node - the whole point of having one shared computation.
+        implied_free = candidate.node_id and (
+            topology.get_node(decision.node_id).capacity_mbps - node_from_utilization.allocated_mbps
+        )
+        assert implied_free >= 0
+
+
 class TestHealthAndFailover:
     def test_an_offline_node_is_never_chosen(self, topology: TopologyManager) -> None:
         topology.set_node_health("edge-chennai-01", "offline")

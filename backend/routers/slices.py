@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import time
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response
 
+from core.auth import Principal, ReadScope, WriteScope
 from core.config import settings
+from core.etag import compute_etag, matches
 from core.logging_config import get_logger
+from core.pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, apply_pagination_headers, paginate
 from models.lifecycle_models import (
     SliceScaleRequest,
     SliceStatusChange,
@@ -24,6 +27,7 @@ from models.slice_models import (
 from routers.websocket import manager
 from services.audit_log import audit_log
 from services.conflict_detector import conflict_detector
+from services.idempotency import provision_idempotency_cache
 from services.intent_parser import intent_parser
 from services.sdn_controller import sdn_controller
 from services.slice_registry import slice_registry
@@ -35,13 +39,40 @@ router = APIRouter(prefix="/api/slices", tags=["slices"])
 
 
 @router.post("/provision", response_model=SliceDeploymentResult)
-async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
+async def provision_slice(
+    intent: SliceIntent,
+    principal: Principal = WriteScope,
+    idempotency_key: str | None = Header(
+        default=None,
+        alias="Idempotency-Key",
+        description=(
+            "Optional. Retrying the same key returns the original result "
+            "instead of provisioning a second slice."
+        ),
+    ),
+) -> SliceDeploymentResult:
     """Provision a network slice from a natural-language intent.
 
     Parses the intent, runs admission control, and deploys to the SDN
     controller when no blocking conflict is found. Advisory findings are
     reported but do not prevent deployment.
+
+    A client-supplied Idempotency-Key makes a retried request (a timeout, a
+    double-click, a proxy retry) safe: the first request with a given key
+    provisions normally, and every subsequent request with that same key -
+    scoped to the calling principal, so one caller's key cannot return
+    another caller's result - returns the cached result instead of
+    provisioning a second slice.
     """
+    # Scope the cache key to the principal: two different callers who happen
+    # to choose the same idempotency key must not see each other's slices.
+    cache_key = f"{principal.actor}:{idempotency_key}" if idempotency_key else None
+    if cache_key:
+        cached = provision_idempotency_cache.get(cache_key)
+        if cached is not None:
+            logger.info("Idempotent replay for key '%s'", idempotency_key)
+            return cached
+
     start_time = time.time()
 
     try:
@@ -55,6 +86,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
         "slice_provision_requested",
         config,
         f"Provisioning requested for '{config.name}'",
+        actor=principal.actor,
         detail={"parser": outcome.parser_used, "intent": intent.intent[:500]},
     )
 
@@ -67,6 +99,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
             config,
             f"'{config.name}' rejected: {report.conflict_type} conflict",
             severity="warning",
+            actor=principal.actor,
             detail={
                 "conflict_types": [f.conflict_type for f in report.blocking_findings],
                 "auto_remediation": report.auto_remediation,
@@ -80,7 +113,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
                 "auto_remediation": report.auto_remediation,
             }
         )
-        return SliceDeploymentResult(
+        result = SliceDeploymentResult(
             success=False,
             slice_config=config,
             conflict_report=report,
@@ -93,6 +126,9 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
             parse_fallback_reason=outcome.fallback_reason,
             parse_trace=outcome.trace,
         )
+        if cache_key:
+            provision_idempotency_cache.set(cache_key, result)
+        return result
 
     try:
         deployed = await sdn_controller.deploy_slice(config)
@@ -114,6 +150,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
             "slice_created",
             config,
             f"'{config.name}' activated ({config.guaranteed_bitrate_mbps:.0f} Mbps GBR)",
+            actor=principal.actor,
             detail={
                 "warnings": [f.conflict_type for f in report.warnings],
                 "node_id": placement.node_id,
@@ -124,7 +161,7 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
     else:
         config.status = "rejected"
 
-    return SliceDeploymentResult(
+    result = SliceDeploymentResult(
         success=deployed,
         slice_config=config,
         conflict_report=report,
@@ -138,10 +175,15 @@ async def provision_slice(intent: SliceIntent) -> SliceDeploymentResult:
         parse_fallback_reason=outcome.fallback_reason,
         parse_trace=outcome.trace,
     )
+    if cache_key:
+        provision_idempotency_cache.set(cache_key, result)
+    return result
 
 
 @router.post("/simulate", response_model=SliceSimulationResult)
-async def simulate_slice(request: SliceSimulationRequest) -> SliceSimulationResult:
+async def simulate_slice(
+    request: SliceSimulationRequest, principal: Principal = ReadScope
+) -> SliceSimulationResult:
     """Dry-run admission control without touching the network.
 
     Answers 'would this intent deploy, and if not what would it take?' so an
@@ -176,11 +218,23 @@ async def simulate_slice(request: SliceSimulationRequest) -> SliceSimulationResu
 
 @router.get("", response_model=list[SliceConfig])
 async def get_all_slices(
+    request: Request,
+    response: Response,
     use_case: str | None = Query(default=None, description="Filter by use-case category"),
     location: str | None = Query(default=None, description="Filter by location"),
     status: str | None = Query(default=None, description="Filter by lifecycle status"),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE),
+    principal: Principal = ReadScope,
 ) -> list[SliceConfig]:
-    """List provisioned slices, optionally filtered."""
+    """List provisioned slices, optionally filtered.
+
+    Paginated: the body stays a plain array so no existing caller breaks,
+    and pagination metadata rides in X-Total-Count and a Link header
+    (rel="next"/"prev"/"first"/"last"), the same convention GitHub's API
+    uses. A caller that ignores the headers just gets the first
+    `limit` (default 100, capped at 500) matches.
+    """
     slices = slice_registry.get_all_slices()
     if use_case:
         slices = [s for s in slices if s.use_case.lower() == use_case.lower()]
@@ -188,17 +242,20 @@ async def get_all_slices(
         slices = [s for s in slices if s.location.lower() == location.lower()]
     if status:
         slices = [s for s in slices if s.status == status]
-    return slices
+
+    page = paginate(slices, offset, limit)
+    apply_pagination_headers(response, request, page)
+    return slices[offset : offset + limit]
 
 
 @router.get("/stats/summary", response_model=SliceStats)
-async def get_slice_stats() -> SliceStats:
+async def get_slice_stats(principal: Principal = ReadScope) -> SliceStats:
     """Summary counters for the dashboard header."""
     return slice_registry.get_stats()
 
 
 @router.get("/stats/breakdown")
-async def get_slice_breakdown() -> dict:
+async def get_slice_breakdown(principal: Principal = ReadScope) -> dict:
     """Group slices by SST, status, use case, location and isolation."""
     return {
         "capacity_mbps": settings.total_bandwidth_mbps,
@@ -209,22 +266,55 @@ async def get_slice_breakdown() -> dict:
 
 
 @router.get("/{slice_id}", response_model=SliceConfig)
-async def get_slice(slice_id: str) -> SliceConfig:
-    """Retrieve a single slice by id."""
+async def get_slice(
+    slice_id: str, response: Response, principal: Principal = ReadScope
+) -> SliceConfig:
+    """Retrieve a single slice by id.
+
+    Sets an ETag identifying this exact state, for use as an If-Match
+    precondition on a later PATCH.
+    """
     config = slice_registry.get_slice(slice_id)
     if not config:
         raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
+    response.headers["ETag"] = compute_etag(config)
     return config
 
 
-@router.patch("/{slice_id}", response_model=SliceConfig)
-async def update_slice(slice_id: str, request: SliceUpdateRequest) -> SliceConfig:
-    """Apply a partial update to a live slice, re-running admission control."""
+async def _apply_update(
+    slice_id: str,
+    changes: dict,
+    *,
+    actor: str,
+    if_match: str | None,
+) -> SliceConfig:
+    """Shared update logic for both PATCH and /scale.
+
+    A plain function with no FastAPI-special defaults (Depends, Header, ...),
+    deliberately: an earlier version of this code had /scale call the PATCH
+    route handler directly as a Python coroutine, and each parameter FastAPI
+    resolves only through actual routing (Response injection, the Header()
+    sentinel for If-Match) broke that direct call the moment it was added -
+    twice, in the same afternoon. Extracting the real logic here removes the
+    footgun instead of threading yet another special case around it.
+    """
     existing = slice_registry.get_slice(slice_id)
     if not existing:
         raise HTTPException(status_code=404, detail=f"Slice '{slice_id}' not found")
 
-    changes = request.changes()
+    if if_match is not None and not matches(compute_etag(existing), if_match):
+        # 412, not 409: this is specifically a failed HTTP conditional-request
+        # precondition (RFC 7232 S4.2), which is what tells an HTTP client
+        # library to treat it as "re-fetch and retry" rather than a generic
+        # business-rule conflict like the 409s used elsewhere in this file.
+        raise HTTPException(
+            status_code=412,
+            detail=(
+                "The slice has changed since it was last read (ETag mismatch). "
+                "Re-fetch it and retry the update."
+            ),
+        )
+
     if not changes:
         raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -247,15 +337,59 @@ async def update_slice(slice_id: str, request: SliceUpdateRequest) -> SliceConfi
         )
 
     updated = slice_registry.update_slice(slice_id, changes)
+    # No await since the existence check above, so the slice cannot have
+    # been deleted out from under this update - unlike delete_slice()
+    # below, which awaits the SDN controller between its own check and the
+    # actual delete and has to handle the concurrent-delete case for real.
+    assert updated is not None
     audit_log.record_slice_event(
-        "slice_updated", updated, f"'{updated.name}' updated", detail={"changes": changes}
+        "slice_updated",
+        updated,
+        f"'{updated.name}' updated",
+        actor=actor,
+        detail={"changes": changes},
     )
     await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
     return updated
 
 
+@router.patch("/{slice_id}", response_model=SliceConfig)
+async def update_slice(
+    slice_id: str,
+    request: SliceUpdateRequest,
+    response: Response,
+    principal: Principal = WriteScope,
+    if_match: str | None = Header(
+        default=None,
+        alias="If-Match",
+        description=(
+            "Optional. The ETag from a prior GET; rejected with 412 if the "
+            "slice has changed since, preventing a lost update."
+        ),
+    ),
+) -> SliceConfig:
+    """Apply a partial update to a live slice, re-running admission control.
+
+    Supplying If-Match (the ETag from a previous GET of this slice) turns a
+    silent lost update - two operators both reading the same slice and both
+    PATCHing from what they saw - into an explicit 412, so the second
+    writer is told to re-read and retry instead of unknowingly overwriting
+    the first writer's change.
+    """
+    updated = await _apply_update(
+        slice_id, request.changes(), actor=principal.actor, if_match=if_match
+    )
+    response.headers["ETag"] = compute_etag(updated)
+    return updated
+
+
 @router.post("/{slice_id}/scale", response_model=SliceConfig)
-async def scale_slice(slice_id: str, request: SliceScaleRequest) -> SliceConfig:
+async def scale_slice(
+    slice_id: str,
+    request: SliceScaleRequest,
+    response: Response,
+    principal: Principal = WriteScope,
+) -> SliceConfig:
     """Scale a slice's guaranteed bandwidth by a factor or to an absolute value."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -266,17 +400,23 @@ async def scale_slice(slice_id: str, request: SliceScaleRequest) -> SliceConfig:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return await update_slice(
+    updated = await _apply_update(
         slice_id,
-        SliceUpdateRequest(
-            guaranteed_bitrate_mbps=target,
-            max_bitrate_mbps=max(target, existing.max_bitrate_mbps),
-        ),
+        {
+            "guaranteed_bitrate_mbps": target,
+            "max_bitrate_mbps": max(target, existing.max_bitrate_mbps),
+        },
+        actor=principal.actor,
+        if_match=None,
     )
+    response.headers["ETag"] = compute_etag(updated)
+    return updated
 
 
 @router.post("/{slice_id}/suspend", response_model=SliceStatusChange)
-async def suspend_slice(slice_id: str) -> SliceStatusChange:
+async def suspend_slice(
+    slice_id: str, principal: Principal = WriteScope
+) -> SliceStatusChange:
     """Suspend a slice, releasing its guaranteed bandwidth back to the pool."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -287,8 +427,13 @@ async def suspend_slice(slice_id: str) -> SliceStatusChange:
         )
 
     updated = slice_registry.set_status(slice_id, "pending")
+    assert updated is not None  # no await since the existence check above
     audit_log.record_slice_event(
-        "slice_suspended", updated, f"'{updated.name}' suspended", severity="warning"
+        "slice_suspended",
+        updated,
+        f"'{updated.name}' suspended",
+        severity="warning",
+        actor=principal.actor,
     )
     await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
     return SliceStatusChange(
@@ -303,7 +448,9 @@ async def suspend_slice(slice_id: str) -> SliceStatusChange:
 
 
 @router.post("/{slice_id}/resume", response_model=SliceStatusChange)
-async def resume_slice(slice_id: str) -> SliceStatusChange:
+async def resume_slice(
+    slice_id: str, principal: Principal = WriteScope
+) -> SliceStatusChange:
     """Reactivate a suspended slice, subject to current capacity."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -319,7 +466,10 @@ async def resume_slice(slice_id: str) -> SliceStatusChange:
 
     previous = existing.status
     updated = slice_registry.set_status(slice_id, "active")
-    audit_log.record_slice_event("slice_resumed", updated, f"'{updated.name}' resumed")
+    assert updated is not None  # no await since the existence check above
+    audit_log.record_slice_event(
+        "slice_resumed", updated, f"'{updated.name}' resumed", actor=principal.actor
+    )
     await manager.broadcast_slice_updated(updated.model_dump(mode="json"))
     return SliceStatusChange(
         slice_id=slice_id,
@@ -330,7 +480,7 @@ async def resume_slice(slice_id: str) -> SliceStatusChange:
 
 
 @router.delete("/{slice_id}")
-async def delete_slice(slice_id: str) -> dict:
+async def delete_slice(slice_id: str, principal: Principal = WriteScope) -> dict:
     """Tear a slice down on the controller and remove it from the registry."""
     existing = slice_registry.get_slice(slice_id)
     if not existing:
@@ -338,8 +488,18 @@ async def delete_slice(slice_id: str) -> dict:
 
     await sdn_controller.remove_slice(slice_id)
     removed = slice_registry.delete_slice(slice_id)
+    if removed is None:
+        # A genuinely reachable race, not just a type-checker nitpick: this
+        # awaited the SDN controller between the existence check above and
+        # the delete itself, so a second concurrent DELETE for the same
+        # slice can legitimately win that race and get here first.
+        raise HTTPException(
+            status_code=404, detail=f"Slice '{slice_id}' was already deleted"
+        )
     topology_manager.unplace(slice_id)
-    audit_log.record_slice_event("slice_deleted", removed, f"'{removed.name}' deleted")
+    audit_log.record_slice_event(
+        "slice_deleted", removed, f"'{removed.name}' deleted", actor=principal.actor
+    )
     await manager.broadcast_slice_deleted(slice_id)
 
     return {

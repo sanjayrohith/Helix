@@ -1,0 +1,28 @@
+# Local hygiene checks that mirror what CI enforces, run before a commit
+# lands instead of after a push. Install once with `pre-commit install`
+# (see `make setup`); `pre-commit run --all-files` runs everything by hand.
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ['--maxkb=1024']
+      - id: check-json
+      - id: check-yaml
+        exclude: ^frontend/  # tsconfig-style comments trip the YAML parser
+      - id: check-toml
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.4
+    hooks:
+      - id: ruff
+        name: ruff (backend lint)
+        files: ^backend/
+        args: ['--fix']
+        # Formatting is deliberately left out: the codebase predates
+        # ruff-format and isn't compliant with it yet, and reformatting
+        # everything in one pass to enable a hook isn't this pass's job.

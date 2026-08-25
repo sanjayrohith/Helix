@@ -1,9 +1,12 @@
 """WebSocket router for real-time slice updates."""
 
-
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from core.auth import try_authenticate_websocket
+from core.logging_config import get_logger
 from models.slice_models import WebSocketMessage
+
+logger = get_logger("ws")
 
 router = APIRouter()
 
@@ -77,7 +80,7 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, api_key: str | None = None):
     """
     WebSocket endpoint for real-time slice updates.
 
@@ -85,7 +88,22 @@ async def websocket_endpoint(websocket: WebSocket):
     - slice_created: When a new slice is successfully deployed
     - slice_deleted: When a slice is removed
     - conflict_detected: When a slice provisioning fails due to conflict
+    - telemetry: A sampling interval's KPIs and SLA verdicts
+
+    When HELIX_API_KEYS is configured, a key (read scope is sufficient) must
+    be supplied as ?api_key=... - browsers cannot attach a custom header to
+    a WebSocket handshake, so a query parameter is the only practical option.
+    Unset HELIX_API_KEYS and the socket behaves exactly as before: open to
+    anyone who can reach it.
     """
+    principal = try_authenticate_websocket(api_key)
+    if principal is None:
+        # Close before accept(): the handshake never completes, so this
+        # never touches the connection pool or broadcasts.
+        await websocket.close(code=4401, reason="Invalid or missing API key")
+        logger.warning("Rejected WebSocket connection with an invalid API key")
+        return
+
     await manager.connect(websocket)
     try:
         while True:

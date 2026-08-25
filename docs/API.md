@@ -9,11 +9,27 @@ Write requests are rate limited per client (60/minute by default,
 `X-Request-ID` and `X-Response-Time-Ms`, and an inbound `X-Request-ID` is
 reused so a trace started upstream continues through the logs.
 
+## Authentication
+
+Send an API key as `Authorization: Bearer <key>` or `X-API-Key: <key>`. Every
+route needs at least `read` scope; provisioning, updating, scaling,
+suspending, resuming and deleting slices need `write`. See
+[SECURITY.md](SECURITY.md) for the full model.
+
+Auth is opt-in: with `HELIX_API_KEYS` unset (the default), every request is
+treated as a fully-privileged system principal - nothing below changes
+behavior until at least one key is configured. `/health` and
+`/api/system/readiness` never require a key.
+
+Missing or invalid credentials return `401`; a key without the required
+scope returns `403`.
+
 ## Slices
 
 ### `POST /api/slices/provision`
 
-Parse an intent, run admission control, deploy and place the slice.
+Parse an intent, run admission control, deploy and place the slice. Requires
+`write` scope.
 
 ```json
 { "intent": "Ultra-reliable slice for remote surgery at Chennai with 3ms latency and 80 Mbps" }
@@ -27,6 +43,16 @@ A blocking conflict returns `200` with `success: false` — it is a valid answer
 to a valid request, not an error — and
 `conflict_report.auto_remediation` holds the field changes that would make it
 deploy.
+
+Send an `Idempotency-Key` header to make retries safe: a repeated key (from
+the same actor) replays the cached response instead of provisioning a second
+slice, including a cached conflict response. Keys are scoped per-actor and
+expire after a TTL; omit the header and every request provisions
+independently, which is the right default for anything that isn't a
+client-side retry.
+
+Blank or whitespace-only intents, and intents over 2000 characters, are
+rejected with `422` at the schema boundary rather than reaching the parser.
 
 ### `POST /api/slices/simulate`
 
@@ -42,11 +68,17 @@ conflict report.
 
 ### `GET /api/slices`
 
-List slices. Optional `use_case`, `location` and `status` filters.
+List slices. Optional `use_case`, `location` and `status` filters, plus
+`offset`/`limit` pagination (default 100, max 500 per page). The response
+carries `X-Total-Count` and an RFC 5988 `Link` header (`rel="next"`,
+`rel="prev"`) — follow the header rather than computing offsets by hand, so a
+client survives the page size changing later.
 
 ### `GET /api/slices/{slice_id}`
 
-One slice, or `404`.
+One slice, or `404`. Returns an `ETag` header derived from the slice's
+content — pass it back as `If-Match` on a subsequent `PATCH` to catch a lost
+update (see below).
 
 ### `PATCH /api/slices/{slice_id}`
 
@@ -55,6 +87,12 @@ Partial update. Any subset of `name`, `guaranteed_bitrate_mbps`,
 `security_level`. Capacity is rechecked excluding the slice's own current
 reservation, so shrinking an oversubscribed slice is not blocked by its own
 allocation. Returns `409` when the update would exceed capacity.
+
+Optionally send `If-Match: <etag>` (from a prior `GET`) for optimistic
+concurrency: if the slice changed since that `ETag` was issued, the update is
+rejected with `412 Precondition Failed` instead of silently overwriting
+whatever changed it. Omit the header to skip the check, same as before this
+existed.
 
 ### `POST /api/slices/{slice_id}/scale`
 
@@ -69,7 +107,8 @@ longer available.
 ### `DELETE /api/slices/{slice_id}`
 
 Withdraws the flow rules, releases the node placement and reports
-`released_mbps`.
+`released_mbps`. Returns `404` (rather than crashing) if a concurrent delete
+for the same slice won the race first.
 
 ### `GET /api/slices/stats/summary` · `/stats/breakdown`
 
@@ -121,7 +160,7 @@ artefact. Add `&download=true` for a file attachment.
 
 | Endpoint | Returns |
 | --- | --- |
-| `GET /api/events` | Audit journal (`?limit=`, `?slice_id=`, `?event_type=`, `?severity=`) |
+| `GET /api/events` | Audit journal (`?limit=`, `?offset=`, `?slice_id=`, `?event_type=`, `?severity=`; paginated like `/api/slices`) |
 | `GET /api/events/summary` | Counts by type and severity |
 | `GET /api/system/info` | Effective configuration, storage and monitor status |
 | `GET /api/system/parser` | Which parser is active and whether the LLM is configured |
@@ -136,6 +175,11 @@ Connect and receive JSON frames of the shape `{"event": ..., "data": ...}`.
 Send the literal string `ping` for a `pong` heartbeat reply — note that the
 reply is not JSON.
 
+If `HELIX_API_KEYS` is configured, pass a key as `?api_key=...` on the
+connection URL (browsers can't set custom headers during a WebSocket
+handshake) — the connection is closed with code `4401` before being accepted
+if the key is missing or invalid. With auth unconfigured, no key is needed.
+
 | Event | Payload |
 | --- | --- |
 | `slice_created` | The new slice configuration |
@@ -146,16 +190,29 @@ reply is not JSON.
 
 ## Error shape
 
-Errors return FastAPI's standard body:
+Every error — a validation failure, a deliberate rejection, or a truly
+unexpected exception — returns the same envelope:
 
 ```json
-{ "detail": "Slice 'abc' not found" }
+{ "detail": "Slice 'abc' not found", "code": "not_found", "request_id": "..." }
 ```
 
-| Status | Meaning |
-| --- | --- |
-| `400` | Unparseable intent, empty update, unknown export format |
-| `404` | No such slice or node |
-| `409` | Capacity exceeded, or an invalid lifecycle transition |
-| `429` | Write rate limit exceeded; see `Retry-After` |
-| `502` | The SDN controller failed the deployment |
+`detail` is a human-readable message (or, for a `422` validation error, the
+structured list of field errors Pydantic produces). `code` is a stable,
+machine-readable string for programmatic branching. `request_id` matches the
+`X-Request-ID` response header and the corresponding server log line — include
+it when reporting an issue.
+
+| Status | Code | Meaning |
+| --- | --- | --- |
+| `400` | `bad_request` | Unparseable intent, empty update, unknown export format |
+| `401` | `unauthorized` | Missing or invalid API key (auth configured) |
+| `403` | `forbidden` | Key valid but lacks the required scope |
+| `404` | `not_found` | No such slice or node |
+| `409` | `conflict` | Capacity exceeded, or an invalid lifecycle transition |
+| `412` | `precondition_failed` | `If-Match` did not match the slice's current `ETag` |
+| `413` | `payload_too_large` | Request body exceeds `HELIX_MAX_BODY_BYTES` |
+| `422` | `validation_error` | Request body failed schema validation |
+| `429` | `rate_limited` | Write rate limit exceeded; see `Retry-After` |
+| `502` | `upstream_error` | The SDN controller failed the deployment |
+| `500` | `internal_error` | Unexpected server error; the traceback is logged server-side only |

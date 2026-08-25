@@ -11,7 +11,7 @@ FRONT   := frontend
 PORT    ?= 8000
 
 .DEFAULT_GOAL := help
-.PHONY: help setup backend frontend dev test lint fmt smoke build clean docker docker-down reset-db
+.PHONY: help setup backend frontend dev test lint fmt typecheck precommit smoke build clean docker docker-down reset-db
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -21,6 +21,7 @@ setup: ## Create the virtualenv and install backend + frontend dependencies
 	python3 -m venv $(VENV)
 	$(PIP) install -q -r $(BACKEND)/requirements-dev.txt
 	cd $(FRONT) && npm install --no-audit --no-fund
+	$(VENV)/bin/pre-commit install
 	@echo "Ready. Run 'make dev' to start both services."
 
 backend: ## Run the API with reload on http://localhost:$(PORT)
@@ -35,12 +36,19 @@ dev: ## Run the API and dashboard together
 test: ## Run the backend test suite
 	cd $(BACKEND) && ../$(PY) -m pytest
 
-lint: ## Lint the backend and typecheck the frontend
+lint: ## Lint and typecheck both backend and frontend
 	cd $(BACKEND) && ../$(VENV)/bin/ruff check .
-	cd $(FRONT) && npx tsc --noEmit
+	cd $(FRONT) && npm run lint && npx tsc --noEmit
 
-fmt: ## Apply ruff autofixes to the backend
+fmt: ## Apply ruff autofixes to the backend and prettier to the frontend
 	cd $(BACKEND) && ../$(VENV)/bin/ruff check --fix .
+	cd $(FRONT) && npm run format
+
+typecheck: ## Type-check the backend with mypy
+	cd $(BACKEND) && ../$(VENV)/bin/mypy
+
+precommit: ## Run all pre-commit hooks against the whole repo
+	$(VENV)/bin/pre-commit run --all-files
 
 smoke: ## Run the end-to-end smoke test against a running API
 	$(PY) scripts/smoke_test.py --base-url http://localhost:$(PORT)
@@ -57,6 +65,18 @@ docker-down: ## Stop the docker compose stack
 reset-db: ## Delete the local SQLite database
 	rm -f $(BACKEND)/data/helix.db $(BACKEND)/data/helix.db-wal $(BACKEND)/data/helix.db-shm
 	@echo "Database cleared; demo slices will be reseeded on next start."
+
+backup-db: ## Take a consistent live backup of the local database
+	$(PY) scripts/backup_db.py backup
+
+restore-db: ## Restore the local database: make restore-db FROM=path/to/backup.db
+	$(PY) scripts/backup_db.py restore --from $(FROM) --force
+
+verify-db: ## Check the local database's integrity and schema version
+	$(PY) scripts/backup_db.py verify $(BACKEND)/data/helix.db
+
+load-test: ## Load-test a running API (default localhost:8000)
+	$(PY) scripts/load_test.py --base-url http://localhost:$(PORT)
 
 clean: ## Remove build artefacts and caches
 	rm -rf $(FRONT)/dist $(FRONT)/node_modules/.vite

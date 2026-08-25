@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
 
+from core.auth import Principal, ReadScope, WriteScope
 from models.telemetry_models import (
     NetworkKpiSummary,
     SlaEvaluation,
@@ -20,14 +21,14 @@ router = APIRouter(prefix="/api/telemetry", tags=["telemetry"])
 
 
 @router.get("/summary", response_model=NetworkKpiSummary)
-async def network_summary() -> NetworkKpiSummary:
+async def network_summary(principal: Principal = ReadScope) -> NetworkKpiSummary:
     """Network-wide KPI rollup with SLA status counts."""
     evaluations = sla_monitor.evaluate_all(slice_registry.get_active_slices())
     return telemetry_engine.network_summary(sla_monitor.status_counts(evaluations))
 
 
 @router.get("/latest", response_model=list[SliceTelemetry])
-async def latest_all() -> list[SliceTelemetry]:
+async def latest_all(principal: Principal = ReadScope) -> list[SliceTelemetry]:
     """The most recent sample for every slice being monitored."""
     return list(telemetry_engine.latest_all().values())
 
@@ -35,6 +36,7 @@ async def latest_all() -> list[SliceTelemetry]:
 @router.get("/sla", response_model=list[SlaEvaluation])
 async def sla_all(
     status: str | None = Query(default=None, description="Filter by SLA status"),
+    principal: Principal = ReadScope,
 ) -> list[SlaEvaluation]:
     """SLA verdicts for every active slice."""
     evaluations = sla_monitor.evaluate_all(slice_registry.get_active_slices())
@@ -44,18 +46,20 @@ async def sla_all(
 
 
 @router.get("/violations", response_model=list[SlaEvaluation])
-async def sla_violations() -> list[SlaEvaluation]:
+async def sla_violations(principal: Principal = ReadScope) -> list[SlaEvaluation]:
     """Only the slices that are at risk or already violating their SLA."""
     evaluations = sla_monitor.evaluate_all(slice_registry.get_active_slices())
     return [e for e in evaluations if e.status in ("at_risk", "violated")]
 
 
 @router.post("/tick")
-async def force_tick() -> dict:
+async def force_tick(principal: Principal = WriteScope) -> dict:
     """Run one sampling interval immediately.
 
     Useful for demos and tests that should not wait for the next scheduled
-    interval to populate the dashboard.
+    interval to populate the dashboard. Classed as a write because it
+    advances shared simulator state and broadcasts to every connected
+    dashboard, not because it changes a slice.
     """
     evaluations = await monitor_loop.tick()
     return {
@@ -69,6 +73,7 @@ async def force_tick() -> dict:
 async def slice_telemetry(
     slice_id: str,
     history: int = Query(default=60, ge=1, le=1000, description="Samples to return"),
+    principal: Principal = ReadScope,
 ) -> TelemetrySnapshot:
     """Latest sample, SLA verdict and recent history for one slice."""
     config = slice_registry.get_slice(slice_id)
@@ -85,7 +90,7 @@ async def slice_telemetry(
 
 
 @router.get("/{slice_id}/sla-target", response_model=SlaTarget)
-async def slice_sla_target(slice_id: str) -> SlaTarget:
+async def slice_sla_target(slice_id: str, principal: Principal = ReadScope) -> SlaTarget:
     """The SLA a slice is held to, derived from its configuration."""
     config = slice_registry.get_slice(slice_id)
     if not config:
@@ -97,6 +102,7 @@ async def slice_sla_target(slice_id: str) -> SlaTarget:
 async def slice_averages(
     slice_id: str,
     window: int = Query(default=10, ge=1, le=200, description="Samples to average over"),
+    principal: Principal = ReadScope,
 ) -> dict:
     """Rolling KPI averages for one slice."""
     if not slice_registry.get_slice(slice_id):

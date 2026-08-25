@@ -21,3 +21,11 @@ ignore = ["E501", "B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# Scoped to source: the test suite leans on Pydantic's **dict-unpacking
+# factories and yield-based fixtures, which mypy models poorly and pytest
+# already exercises at runtime - not worth chasing here.
+files = ["routers", "core", "services", "storage", "models", "main.py"]

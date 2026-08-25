@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { POLL_INTERVAL_MS, SPARKLINE_POINTS } from './config';
 import { ActivityFeed } from './components/ActivityFeed';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { ConnectionStatus } from './components/ConnectionStatus';
 import { DeploymentResult } from './components/DeploymentResult';
 import { IntentInput } from './components/IntentInput';
@@ -328,6 +329,7 @@ function App() {
               : 'border border-amber-200/40 bg-amber-300/20 text-amber-100'
           }`}
           role="status"
+          aria-live="polite"
         >
           <div className="flex items-center gap-2 font-syne">
             <span>{toast.message}</span>
@@ -359,15 +361,19 @@ function App() {
         </div>
 
         <div className="reveal-up reveal-delay-1">
-          <NetworkKpiBar
-            summary={kpiSummary}
-            history={kpiHistory}
-            live={connection === 'open'}
-          />
+          <ErrorBoundary section="Network KPIs">
+            <NetworkKpiBar
+              summary={kpiSummary}
+              history={kpiHistory}
+              live={connection === 'open'}
+            />
+          </ErrorBoundary>
         </div>
 
         <div className="reveal-up reveal-delay-2">
-          <SlaAlertPanel evaluations={slaEvaluations} onInspect={setSelectedSliceId} />
+          <ErrorBoundary section="SLA alerts">
+            <SlaAlertPanel evaluations={slaEvaluations} onInspect={setSelectedSliceId} />
+          </ErrorBoundary>
         </div>
 
         <div className="reveal-up reveal-delay-2">
@@ -406,7 +412,9 @@ function App() {
         )}
 
         <div className="reveal-up reveal-delay-3">
-          <TopologyPanel refreshKey={refreshKey} />
+          <ErrorBoundary section="Network topology">
+            <TopologyPanel refreshKey={refreshKey} />
+          </ErrorBoundary>
         </div>
 
         <div className="reveal-up reveal-delay-3">
@@ -416,27 +424,33 @@ function App() {
             onChange={setFilters}
             resultCount={visibleSlices.length}
           />
-          <SliceDashboard
-            slices={visibleSlices}
-            loading={loading}
-            onDeleteSlice={handleDeleteSlice}
-            deletingSliceId={deletingSliceId}
-            onSelectSlice={setSelectedSliceId}
-            slaEvaluations={slaEvaluations}
-          />
-          <ActivityFeed refreshKey={refreshKey} />
+          <ErrorBoundary section="Slice list">
+            <SliceDashboard
+              slices={visibleSlices}
+              loading={loading}
+              onDeleteSlice={handleDeleteSlice}
+              deletingSliceId={deletingSliceId}
+              onSelectSlice={setSelectedSliceId}
+              slaEvaluations={slaEvaluations}
+            />
+          </ErrorBoundary>
+          <ErrorBoundary section="Activity feed">
+            <ActivityFeed refreshKey={refreshKey} />
+          </ErrorBoundary>
         </div>
       </main>
 
-      <SliceDetailDrawer
-        slice={selectedSlice}
-        onClose={() => setSelectedSliceId(null)}
-        onChanged={() => {
-          fetchData();
-          fetchTelemetry();
-        }}
-        onNotify={showToast}
-      />
+      <ErrorBoundary section="Slice detail">
+        <SliceDetailDrawer
+          slice={selectedSlice}
+          onClose={() => setSelectedSliceId(null)}
+          onChanged={() => {
+            fetchData();
+            fetchTelemetry();
+          }}
+          onNotify={showToast}
+        />
+      </ErrorBoundary>
 
       <footer className="mt-12 border-t border-white/10 bg-black/10">
         <div className="mx-auto max-w-7xl px-4 py-4">

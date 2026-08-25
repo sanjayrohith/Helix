@@ -16,12 +16,30 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# An intent longer than this has no legitimate use case (the parser only
+# reads structured facts out of a sentence or two) and unbounded text is a
+# storage and LLM-cost amplification vector: it gets parsed, potentially sent
+# to Groq, and stored verbatim in the audit journal.
+MAX_INTENT_LENGTH = 2000
+
+
 class SliceIntent(BaseModel):
     """Raw natural language intent from network operator."""
 
     intent: str = Field(
-        ..., description="Plain English description of slice requirement"
+        ...,
+        min_length=1,
+        max_length=MAX_INTENT_LENGTH,
+        description="Plain English description of slice requirement",
     )
+
+    @field_validator("intent")
+    @classmethod
+    def intent_must_not_be_blank(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Intent must not be blank")
+        return cleaned
 
 
 class SliceConfig(BaseModel):
@@ -56,9 +74,10 @@ class SliceConfig(BaseModel):
     device_count: int = Field(..., ge=1, description="Number of devices in the slice")
     use_case: str = Field(
         ...,
+        max_length=100,
         description="Use case category (e.g., 'healthcare', 'autonomous-vehicles', 'iot')",
     )
-    location: str = Field(..., description="Geographic location or zone")
+    location: str = Field(..., max_length=200, description="Geographic location or zone")
     status: Literal["pending", "active", "conflict", "rejected"] = Field(
         default="pending", description="Current slice status"
     )

@@ -19,7 +19,7 @@ from services.topology import topology_manager
 _ESCAPES = str.maketrans({"\\": "\\\\", '"': '\\"', "\n": "\\n"})
 
 
-def _escape(value: str) -> str:
+def _escape(value: object) -> str:
     return str(value).translate(_ESCAPES)
 
 
@@ -141,12 +141,16 @@ def render_metrics() -> str:
         writer.sample("helix_node_hosted_slices", node.hosted_slices, **labels)
 
     # --- controller -------------------------------------------------------------------
-    status = sdn_controller.get_controller_status()
+    controller_status = sdn_controller.get_controller_status()
     writer.family("helix_sdn_connected", "Whether the SDN controller is reachable")
-    writer.sample("helix_sdn_connected", 1 if status["connected"] else 0)
+    writer.sample("helix_sdn_connected", 1 if controller_status["connected"] else 0)
 
     writer.family("helix_sdn_deployments_total", "Slice deployments attempted", "counter")
-    writer.sample("helix_sdn_deployments_total", status["total_deployments"], outcome="success")
-    writer.sample("helix_sdn_deployments_total", status["failed_deployments"], outcome="failure")
+    writer.sample(
+        "helix_sdn_deployments_total", controller_status["total_deployments"], outcome="success"
+    )
+    writer.sample(
+        "helix_sdn_deployments_total", controller_status["failed_deployments"], outcome="failure"
+    )
 
     return writer.render()

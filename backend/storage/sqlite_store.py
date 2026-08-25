@@ -21,42 +21,9 @@ from core.config import settings
 from core.logging_config import get_logger
 from models.event_models import AuditEvent
 from models.slice_models import SliceConfig
+from storage.migrations import LATEST_VERSION, current_version, run_migrations
 
 logger = get_logger("storage")
-
-SCHEMA_VERSION = 1
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS schema_meta (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS slices (
-    slice_id   TEXT PRIMARY KEY,
-    payload    TEXT NOT NULL,
-    status     TEXT NOT NULL,
-    sst        INTEGER NOT NULL,
-    sd         TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_slices_status ON slices(status);
-CREATE INDEX IF NOT EXISTS idx_slices_snssai ON slices(sst, sd);
-
-CREATE TABLE IF NOT EXISTS audit_events (
-    event_id   TEXT PRIMARY KEY,
-    event_type TEXT NOT NULL,
-    severity   TEXT NOT NULL,
-    slice_id   TEXT,
-    timestamp  TEXT NOT NULL,
-    payload    TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_time ON audit_events(timestamp DESC);
-CREATE INDEX IF NOT EXISTS idx_events_slice ON audit_events(slice_id);
-"""
 
 
 class SqliteStore:
@@ -80,13 +47,8 @@ class SqliteStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
         with self._lock:
-            self._conn.executescript(_SCHEMA)
-            self._conn.execute(
-                "INSERT OR REPLACE INTO schema_meta(key, value) VALUES ('version', ?)",
-                (str(SCHEMA_VERSION),),
-            )
-            self._conn.commit()
-        logger.info("SQLite store ready at %s", self.path)
+            version = run_migrations(self._conn)
+        logger.info("SQLite store ready at %s (schema version %d)", self.path, version)
 
     def close(self) -> None:
         with self._lock:
@@ -265,18 +227,23 @@ class SqliteStore:
 
     def stats(self) -> dict:
         """Report storage health for the system-info endpoint."""
-        if not self.enabled:
+        db = self._db
+        if db is None:
+            # Either never enabled, or closed (e.g. during shutdown/tests) -
+            # report as unavailable rather than crashing on a null connection.
             return {"enabled": False}
         size = self.path.stat().st_size if self.path.exists() else 0
         with self._lock:
-            events = int(self._conn.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"])
+            events = int(db.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"])
+            schema_version = current_version(db)
         return {
             "enabled": True,
             "path": str(self.path),
             "size_bytes": size,
             "slices": self.count_slices(),
             "events": events,
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": schema_version,
+            "schema_latest": LATEST_VERSION,
         }
 
 
